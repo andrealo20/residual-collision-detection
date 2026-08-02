@@ -1,6 +1,6 @@
-# qcollide
+# residual-collision-detection
 
-[![ci](https://github.com/andrealo20/qcollide/actions/workflows/ci.yml/badge.svg)](https://github.com/andrealo20/qcollide/actions/workflows/ci.yml)
+[![ci](https://github.com/andrealo20/residual-collision-detection/actions/workflows/ci.yml/badge.svg)](https://github.com/andrealo20/residual-collision-detection/actions/workflows/ci.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![language: C99](https://img.shields.io/badge/language-C99-00599C.svg)](https://en.wikipedia.org/wiki/C99)
 [![tests: 45](https://img.shields.io/badge/tests-45%20passing-brightgreen.svg)](tests/)
@@ -9,10 +9,13 @@
 
 **Sensorless collision detection for robot arms, from the torque residual.**
 
+The library prefix is `qcollide_`, kept short to avoid symbol collisions; the
+repository is named for what it does.
+
 If you know the dynamic model of an arm, you know what torque a given motion
 requires. The difference between that and the measured torque is what the
 outside world is doing to the robot. Detect it and you have collision
-detection with no force sensor, no skin, and no extra hardware, which is the
+detection with no force sensor, no skin, and no extra hardware — which is the
 mechanism behind collaborative robots that stop when you touch them.
 
 ![Residual following a contact](docs/images/residual_trace.png)
@@ -52,28 +55,24 @@ ASan and UBSan.
 The obvious formulation reads the external torque straight off the equation
 of motion:
 
-```
-tau_ext  =  tau_measured  -  M(q) qdd  -  C(q,qd) qd  -  g(q)
-```
+$$\tau_{\text{ext}} \;=\; \tau_{\text{meas}} \;-\; M(q)\,\ddot{q} \;-\; C(q,\dot{q})\,\dot{q} \;-\; g(q)$$
 
-and it fails in practice, because `qdd` is not measured. Getting it means
+and it fails in practice, because $\ddot{q}$ is not measured. Getting it means
 differentiating joint position twice, and each differentiation multiplies
 high-frequency noise by the sampling rate. At 1 kHz, a position signal with a
 micrometre of encoder noise produces an acceleration estimate whose noise
 dwarfs the contact you are trying to detect.
 
-The momentum observer avoids `qdd` entirely. It works with the generalized
-momentum `p = M(q) qd`, whose derivative is
+The momentum observer avoids $\ddot{q}$ entirely. It works with the
+generalized momentum $p = M(q)\,\dot{q}$, whose derivative is
 
-```
-pdot  =  tau  +  C(q,qd)' qd  -  g(q)  +  tau_ext
-```
+$$\dot{p} \;=\; \tau \;+\; C(q,\dot{q})^{\top}\dot{q} \;-\; g(q) \;+\; \tau_{\text{ext}}$$
 
 with no acceleration term anywhere. That identity holds precisely because
-`Mdot - 2C` is skew-symmetric, which is why this repository is careful about
+$\dot{M} - 2C$ is skew-symmetric, which is why this repository is careful about
 *which* Coriolis matrix it computes — see below. Integrating that expression
 and comparing against the measured momentum gives a residual that converges
-to `tau_ext` and is driven by measured quantities only. This is De Luca's
+to $\tau_{\text{ext}}$ and is driven by measured quantities only. This is De Luca's
 formulation, and M1 implements it.
 
 ---
@@ -90,9 +89,7 @@ and on a real arm velocity is not measured either — it comes from differencing
 encoder counts. One differentiation is not free: with a 17-bit encoder at
 10 kHz, a single count becomes
 
-```
-2*pi / 2^17 * 10000  =  0.48 rad/s
-```
+$$\frac{2\pi}{2^{17}} \times 10^{4} \;=\; 0.48\ \text{rad/s}$$
 
 of velocity noise, which is larger than the velocities of interest in slow
 motion.
@@ -123,7 +120,7 @@ equation — which is exactly why it is worth measuring rather than assuming.
 
 The filter is not free either: it trades noise for lag, and lag on an
 accelerating joint appears in the residual as a torque that is not there.
-Measured under 4 rad/s², the velocity estimate trails by 0.021 rad/s against
+Measured under $4\ \text{rad/s}^2$, the velocity estimate trails by 0.021 rad/s against
 the 0.013 the filter time constant predicts.
 
 ### With everything present
@@ -165,12 +162,12 @@ threshold has to sit above it.
 | Model error | Peak residual, no contact |
 |---|---|
 | none | 0.001 Nm |
-| friction ×0.25 | 0.603 Nm |
-| friction ×0.50 | 1.101 Nm |
-| friction ×1.00 | 1.866 Nm |
-| inertia +2 % | 0.178 Nm |
-| inertia +5 % | 0.445 Nm |
-| inertia +10 % | 0.890 Nm |
+| friction $\times 0.25$ | 0.603 Nm |
+| friction $\times 0.50$ | 1.101 Nm |
+| friction $\times 1.00$ | 1.866 Nm |
+| inertia $+2\%$ | 0.178 Nm |
+| inertia $+5\%$ | 0.445 Nm |
+| inertia $+10\%$ | 0.890 Nm |
 
 Parameter error enters the residual almost exactly linearly: doubling it from
 5 % to 10 % moves the floor from 0.445 to 0.890, a ratio of 2.00.
@@ -231,7 +228,8 @@ must stay above the threshold for a number of consecutive samples, and once
 triggered it releases only below a lower threshold. Both cost latency and buy
 robustness, and the exchange rate is measured rather than argued.
 
-Measured on the two-link arm, perfect model, K = 50 (time constant 20 ms):
+Measured on the two-link arm, perfect model, $K = 50$ (time constant
+20 ms):
 
 | Threshold | Detection latency |
 |---|---|
@@ -242,9 +240,9 @@ Measured on the two-link arm, perfect model, K = 50 (time constant 20 ms):
 
 | Observer gain | Time constant | Latency at 1 Nm |
 |---|---|---|
-| K = 20 | 50 ms | 11.3 ms |
-| K = 50 | 20 ms | 4.6 ms |
-| K = 100 | 10 ms | 2.4 ms |
+| $K = 20$ | 50 ms | 11.3 ms |
+| $K = 50$ | 20 ms | 4.6 ms |
+| $K = 100$ | 10 ms | 2.4 ms |
 
 Two further results worth stating:
 
@@ -273,7 +271,7 @@ because the residual never reaches the threshold before the contact ends:
 
 This is a property of any first-order observer, not a defect of this one, and
 it bounds what the method can do: a fast light tap is invisible to it at any
-threshold. Raising K shortens the blind window at the cost of passing more
+threshold. Raising $K$ shortens the blind window at the cost of passing more
 model error, which is exactly the trade-off M3 quantifies.
 
 ---
@@ -282,12 +280,11 @@ model error, which is exactly the trade-off M3 quantifies.
 
 `src/observer.c` implements the residual
 
-```
-r = K ( p  -  integral( tau + C(q,qd)' qd - g(q) + r ) dt  -  p(0) )
-```
+$$r \;=\; K\left(\, p \;-\; \int_0^t \left[\tau + C(q,\dot{q})^{\top}\dot{q} - g(q) + r\right] \mathrm{d}t \;-\; p(0) \right)$$
 
-which satisfies `rdot = K (tau_ext - r)` for each joint independently: a
-first-order response whose time constant is 1/K and nothing else. Everything
+which satisfies $\dot{r} = K\,(\tau_{\text{ext}} - r)$ for each joint
+independently: a first-order response whose time constant is $1/K$ and
+nothing else. Everything
 in it is measured — position, velocity, torque — with no acceleration
 anywhere.
 
@@ -298,22 +295,22 @@ as the plant:
 |---|---|
 | Residual after 2 s with no contact | 0.0 |
 | Residual against an applied 4.0 / −2.0 Nm | 4.0019 / −2.0004 |
-| Time constant at K = 20 / 50 / 100 | 0.0498 / 0.0198 / 0.0098 s |
-| Expected 1/K | 0.0500 / 0.0200 / 0.0100 s |
+| Time constant at $K = 20/50/100$ | 0.0498 / 0.0198 / 0.0098 s |
+| Expected $1/K$ | 0.0500 / 0.0200 / 0.0100 s |
 | Contact on joint 0: loaded / unloaded joint | 5.9955 / 0.0005 Nm |
 | Worst residual during free swing | 0.0000 Nm |
 
 ### Two things that would otherwise fail silently
 
-**The Coriolis transpose.** The residual needs `C'`, not `C`. Using the wrong
+**The Coriolis transpose.** The residual needs $C^{\top}$, not $C$. Using the wrong
 one produces a detector that works perfectly at rest and is wrong whenever
 the arm moves — no error, no warning, just residuals that mean nothing. The
-test suite exercises free motion specifically to catch it: substituting `C`
-for `C'` takes the free-swing residual from 0.0000 to **7.2 Nm** and fails
+test suite exercises free motion specifically to catch it: substituting $C$
+for $C^{\top}$ takes the free-swing residual from 0.0000 to **7.2 Nm** and fails
 three tests. That check was verified by deliberately breaking the code, which
 is the only way to know a test has teeth.
 
-**The integration rule.** The integrand tracks `pdot`, which grows with joint
+**The integration rule.** The integrand tracks $\dot{p}$, which grows with joint
 velocity, so forward Euler leaves an error proportional to the timestep times
 the speed of the arm. On a two-link arm driven to 19 rad/s it produced a
 spurious 0.33 Nm on a joint with no external torque at all — well inside the
@@ -360,24 +357,24 @@ links:
 
 | Quantity | Max difference | Limit |
 |---|---|---|
-| Mass matrix M(q) | 5.3e-15 | 1e-10 |
-| Gravity g(q) | 2.8e-14 | 1e-10 |
-| Coriolis term C(q,qd) qd | 8.1e-09 | 1e-05 |
-| Forward dynamics qdd | 5.6e-08 | 1e-04 |
+| Mass matrix $M(q)$ | 5.3e-15 | 1e-10 |
+| Gravity $g(q)$ | 2.8e-14 | 1e-10 |
+| Coriolis term $C(q,\dot{q})\,\dot{q}$ | 8.1e-09 | 1e-05 |
+| Forward dynamics $\ddot{q}$ | 5.6e-08 | 1e-04 |
 
 The tolerances differ for reasons rather than by taste. M and g are
 closed-form in both implementations and agree to machine precision. The
 Coriolis term goes through central differences here, capping accuracy near
-the square root of machine epsilon. And `qdd` inherits the Coriolis error
-amplified by `M^-1` — measured amplification is 2.4x median at n=2 and 3.4x
-at n=4, with the condition number of M reaching 760 — so its tolerance cannot
+the square root of machine epsilon. And $\ddot{q}$ inherits the Coriolis error
+amplified by $M^{-1}$ — measured amplification is 2.4x median at n=2 and 3.4x
+at n=4, with the condition number of $M$ reaching 760 — so its tolerance cannot
 be tighter than the Coriolis one. An earlier version set it to 1e-8 and the
 code failed for a reason that had nothing to do with correctness.
 
 ### The property the whole project rests on
 
-There are infinitely many matrices `C` for which `C qd` gives the correct
-Coriolis vector. Only one family makes `Mdot - 2C` skew-symmetric, and the
+There are infinitely many matrices $C$ for which $C\dot{q}$ gives the
+correct Coriolis vector. Only one family makes $\dot{M} - 2C$ skew-symmetric, and the
 momentum observer needs that one. Pick another and the observer still runs,
 still produces residuals, and those residuals are wrong in a way nothing else
 would reveal.
@@ -386,7 +383,7 @@ So it is tested directly, by differencing M along the trajectory:
 
 | Measurement | Result |
 |---|---|
-| Skew-symmetry residual of `Mdot - 2C` | 4.1e-09 (matrix scale 6.1) |
+| Skew-symmetry residual of $\dot{M} - 2C$ | 4.1e-09 (matrix scale 6.1) |
 | Mass matrix asymmetry | 0 |
 | Smallest Cholesky pivot over 200 poses | 0.032 |
 | Inverse/forward dynamics round trip | 6.4e-14 |
