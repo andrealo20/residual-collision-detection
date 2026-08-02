@@ -1,0 +1,11 @@
+add_executable(qcollide_sweep sweep.c)
+target_link_libraries(qcollide_sweep PRIVATE qcollide)
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(qcollide_sweep PRIVATE -Wall -Wextra)
+endif()
+
+add_executable(qcollide_trace trace.c)
+target_link_libraries(qcollide_trace PRIVATE qcollide)
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(qcollide_trace PRIVATE -Wall -Wextra)
+endif()

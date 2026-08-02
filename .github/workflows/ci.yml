@@ -1,0 +1,97 @@
+name: ci
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.os }} / ${{ matrix.cc }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        cc: [gcc, clang]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        env:
+          CC: ${{ matrix.cc }}
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DQCOLLIDE_WERROR=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  sanitizers:
+    name: asan + ubsan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Signed overflow and out-of-bounds access are the two failure modes
+      # that produce plausible numbers rather than a crash, which is the
+      # worst outcome for a plant everything else is measured against.
+      - name: Configure with sanitizers
+        env:
+          CC: clang
+          CFLAGS: -fsanitize=address,undefined -fno-sanitize-recover=all -g
+        run: cmake -S . -B build-san -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        run: cmake --build build-san --parallel
+
+      - name: Test
+        run: ctest --test-dir build-san --output-on-failure
+
+  cross-check:
+    name: dynamics vs Pinocchio
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # An independent implementation is the only check that catches a shared
+      # misunderstanding of the model, which no self-written test can.
+      - name: Install Pinocchio
+        run: pip install numpy pin
+
+      - name: Cross-check
+        run: python3 tools/check_dynamics.py
+
+  measurements:
+    name: sweep and figures
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel
+
+      # The sweep is deterministic: a change in these tables between commits
+      # is a change in behaviour, not measurement noise.
+      - name: Trade-off sweep
+        run: ./build/bench/qcollide_sweep | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Regenerate figures
+        run: |
+          pip install numpy matplotlib
+          mkdir -p docs/data
+          ./build/bench/qcollide_trace 0.0 0.00 0 > docs/data/trace_ideal.csv
+          ./build/bench/qcollide_trace 1.0 0.05 1 > docs/data/trace_realistic.csv
+          python3 tools/make_figures.py
