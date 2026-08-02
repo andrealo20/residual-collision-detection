@@ -77,70 +77,190 @@ formulation, and M1 implements it.
 
 ---
 
-## M4: what the sensors cost
+## M0: the plant
 
-M3 gave the observer a wrong model. M4 gives it wrong *measurements*, which
-is the other half of the gap between a simulation and a robot.
+`src/dynamics.c` is an n-link planar arm: mass matrix, Coriolis matrix,
+gravity, forward and inverse dynamics, RK4 integration. Planar keeps the
+algebra small enough to check by hand, which matters because everything else
+in the project is measured against this model.
 
-There is a specific reason this matters here. The momentum observer was
-chosen precisely to avoid joint acceleration, because differentiating
-position twice amplifies quantisation noise. But it still needs **velocity**,
-and on a real arm velocity is not measured either — it comes from differencing
-encoder counts. One differentiation is not free: with a 17-bit encoder at
-10 kHz, a single count becomes
+### Verified against Pinocchio
+<a name="verified-against-pinocchio"></a>
 
-$$\frac{2\pi}{2^{17}} \times 10^{4} \;=\; 0.48\ \text{rad/s}$$
+The plant is the reference the observer is judged by, so it cannot be taken
+on trust. An error here would produce an observer that appears to work while
+measuring the wrong thing — and no self-written test catches a shared
+misunderstanding of the model. [Pinocchio](https://github.com/stack-of-tasks/pinocchio)
+is an independent implementation by another group, so agreement rules that
+out. The same arrangement [qdsp](https://github.com/andrealo20/qdsp) has with
+CMSIS-DSP.
 
-of velocity noise, which is larger than the velocities of interest in slow
-motion.
+```sh
+pip install numpy pin
+python3 tools/check_dynamics.py
+```
 
-![Sources of the residual floor](docs/images/residual_floor.png)
+Maximum absolute disagreement over 60 random configurations at 1, 2, 3 and 4
+links:
 
-### Where the residual floor actually comes from
-
-| Measurement condition | Peak residual, no contact |
-|---|---|
-| exact velocity, no torque noise | 0.003 Nm |
-| exact velocity, 0.05 Nm torque noise | 0.010 Nm |
-| **raw encoder difference** | **26.313 Nm** |
-| encoder difference, 50 Hz filter | 0.477 Nm |
-| filtered velocity + torque noise | 0.480 Nm |
-
-Two results, neither of them the intuitive one.
-
-**Differentiating quantised position destroys the method outright.** A 26 Nm
-residual floor with no contact present, against contacts of a few newton
-metres. Filtering rescues it, reducing the floor by a factor of fifty-five.
-
-**Torque noise is almost irrelevant beside velocity error.** Adding 0.05 Nm
-of torque noise on top of a filtered velocity estimate moves the floor from
-0.477 to 0.480 Nm. That is the opposite of the intuitive ordering — the
-torque measurement is the one that appears explicitly in the residual
-equation — which is exactly why it is worth measuring rather than assuming.
-
-The filter is not free either: it trades noise for lag, and lag on an
-accelerating joint appears in the residual as a torque that is not there.
-Measured under $4\ \text{rad/s}^2$, the velocity estimate trails by 0.021 rad/s against
-the 0.013 the filter time constant predicts.
-
-### With everything present
-
-| Case | Lowest usable threshold | Smallest contact caught |
+| Quantity | Max difference | Limit |
 |---|---|---|
-| perfect model, ideal sensors | 0.10 Nm | 0.10 Nm |
-| real sensors, perfect model | 1.00 Nm | 0.88 Nm |
-| friction + 5 % parameters, ideal sensors | 4.00 Nm | 5.28 Nm |
-| **everything** | **4.00 Nm** | **4.80 Nm** |
+| Mass matrix $M(q)$ | 5.3e-15 | 1e-10 |
+| Gravity $g(q)$ | 2.8e-14 | 1e-10 |
+| Coriolis term $C(q,\dot{q})\,\dot{q}$ | 8.1e-09 | 1e-05 |
+| Forward dynamics $\ddot{q}$ | 5.6e-08 | 1e-04 |
 
-### A note on the roadmap
+The tolerances differ for reasons rather than by taste. M and g are
+closed-form in both implementations and agree to machine precision. The
+Coriolis term goes through central differences here, capping accuracy near
+the square root of machine epsilon. And $\ddot{q}$ inherits the Coriolis error
+amplified by $M^{-1}$ — measured amplification is 2.4x median at n=2 and 3.4x
+at n=4, with the condition number of $M$ reaching 760 — so its tolerance cannot
+be tighter than the Coriolis one. An earlier version set it to 1e-8 and the
+code failed for a reason that had nothing to do with correctness.
 
-M4 was originally planned as a fixed-point implementation. That was changed
-because the portfolio already answers "what does integer arithmetic cost"
-twice, in [qdsp](https://github.com/andrealo20/qdsp) and
-[qcsi](https://github.com/andrealo20/qcsi), while sensor realism is directly
-on this project's thesis and was the one remaining gap between the simulation
-and a robot. A fixed-point observer remains a sensible extension and is
-listed as open rather than quietly dropped.
+### The property the whole project rests on
+
+There are infinitely many matrices $C$ for which $C\dot{q}$ gives the
+correct Coriolis vector. Only one family makes $\dot{M} - 2C$ skew-symmetric, and the
+momentum observer needs that one. Pick another and the observer still runs,
+still produces residuals, and those residuals are wrong in a way nothing else
+would reveal.
+
+So it is tested directly, by differencing M along the trajectory:
+
+| Measurement | Result |
+|---|---|
+| Skew-symmetry residual of $\dot{M} - 2C$ | 4.1e-09 (matrix scale 6.1) |
+| Mass matrix asymmetry | 0 |
+| Smallest Cholesky pivot over 200 poses | 0.032 |
+| Inverse/forward dynamics round trip | 6.4e-14 |
+
+### Integration quality
+
+Energy conservation is checked by *convergence order* rather than against a
+chosen threshold. The distinction matters: a model with a sign error would
+also show small drift at a small step and would pass a threshold test.
+
+| Step | Relative energy drift over 20 s |
+|---|---|
+| 2.0e-3 | 2.33e-05 |
+| 1.0e-3 | 2.51e-06 |
+| 5.0e-4 | 3.89e-07 |
+
+Each halving cuts the drift by roughly an order of magnitude, which is
+fourth-order behaviour. A separate test measures the trajectory error ratio
+directly and gets 18-20 against the expected 16.
+
+---
+
+## M1: the observer
+
+`src/observer.c` implements the residual
+
+$$r \;=\; K\left(\, p \;-\; \int_0^t \left[\tau + C(q,\dot{q})^{\top}\dot{q} - g(q) + r\right] \mathrm{d}t \;-\; p(0) \right)$$
+
+which satisfies $\dot{r} = K\,(\tau_{\text{ext}} - r)$ for each joint
+independently: a first-order response whose time constant is $1/K$ and
+nothing else. Everything
+in it is measured — position, velocity, torque — with no acceleration
+anywhere.
+
+Measured on a two-link arm at 10 kHz, with the observer given the same model
+as the plant:
+
+| Measurement | Result |
+|---|---|
+| Residual after 2 s with no contact | 0.0 |
+| Residual against an applied 4.0 / −2.0 Nm | 4.0019 / −2.0004 |
+| Time constant at $K = 20/50/100$ | 0.0498 / 0.0198 / 0.0098 s |
+| Expected $1/K$ | 0.0500 / 0.0200 / 0.0100 s |
+| Contact on joint 0: loaded / unloaded joint | 5.9955 / 0.0005 Nm |
+| Worst residual during free swing | 0.0000 Nm |
+
+### Two things that would otherwise fail silently
+
+**The Coriolis transpose.** The residual needs $C^{\top}$, not $C$. Using the wrong
+one produces a detector that works perfectly at rest and is wrong whenever
+the arm moves — no error, no warning, just residuals that mean nothing. The
+test suite exercises free motion specifically to catch it: substituting $C$
+for $C^{\top}$ takes the free-swing residual from 0.0000 to **7.2 Nm** and fails
+three tests. That check was verified by deliberately breaking the code, which
+is the only way to know a test has teeth.
+
+**The integration rule.** The integrand tracks $\dot{p}$, which grows with joint
+velocity, so forward Euler leaves an error proportional to the timestep times
+the speed of the arm. On a two-link arm driven to 19 rad/s it produced a
+spurious 0.33 Nm on a joint with no external torque at all — well inside the
+range of a real light contact. The trapezoidal rule reduces that by a factor
+of fifteen at the same step:
+
+| Timestep | Spurious residual, forward Euler | Trapezoidal |
+|---|---|---|
+| 1.0e-3 | 0.333 Nm | 0.022 Nm |
+| 5.0e-4 | 0.165 Nm | 0.010 Nm |
+| 2.5e-4 | 0.082 Nm | 0.005 Nm |
+
+Both remain first order overall, because the residual feeds back into its own
+integral explicitly; the trapezoidal rule buys a much smaller constant rather
+than a better rate.
+
+---
+
+## M2: from residual to decision
+
+`src/detector.c` turns the residual into a trigger. A bare threshold is not
+enough: a single sample above it is not evidence of contact, and a detector
+that fires on the first excursion produces nuisance stops. So the residual
+must stay above the threshold for a number of consecutive samples, and once
+triggered it releases only below a lower threshold. Both cost latency and buy
+robustness, and the exchange rate is measured rather than argued.
+
+Measured on the two-link arm, perfect model, $K = 50$ (time constant
+20 ms):
+
+| Threshold | Detection latency |
+|---|---|
+| 0.5 Nm | 2.2 ms |
+| 1.0 Nm | 4.6 ms |
+| 2.0 Nm | 10.3 ms |
+| 4.0 Nm | 32.2 ms |
+
+| Observer gain | Time constant | Latency at 1 Nm |
+|---|---|---|
+| $K = 20$ | 50 ms | 11.3 ms |
+| $K = 50$ | 20 ms | 4.6 ms |
+| $K = 100$ | 10 ms | 2.4 ms |
+
+Two further results worth stating:
+
+**Minimum detectable torque: 0.9989 Nm at a 1.0 Nm threshold.** Found by
+bisection. The residual converges to the applied torque exactly, so the
+smallest detectable contact is the threshold itself — no signal is lost
+between the contact and the decision.
+
+**Zero false alarms at every threshold tested, down to 0.05 Nm.** That is not
+a result about the method, it is the baseline: with a perfect model and no
+noise there is nothing to trigger on. It is the number M3 destroys by
+introducing friction, and the point of measuring it here is to have something
+to compare against.
+
+### A limit of the method, measured rather than discovered later
+
+A contact shorter than the observer time constant can be missed entirely,
+because the residual never reaches the threshold before the contact ends:
+
+| Contact duration | Fraction of time constant | Outcome |
+|---|---|---|
+| 2 ms | 0.1 | **missed** |
+| 5 ms | 0.25 | detected |
+| 20 ms | 1.0 | detected |
+| 100 ms | 5.0 | detected |
+
+This is a property of any first-order observer, not a defect of this one, and
+it bounds what the method can do: a fast light tap is invisible to it at any
+threshold. Raising $K$ shortens the blind window at the cost of passing more
+model error, which is exactly the trade-off M3 quantifies.
 
 ---
 
@@ -219,193 +339,72 @@ figure and made it mean something.
 
 ---
 
-## M2: from residual to decision
+## M4: what the sensors cost
 
-`src/detector.c` turns the residual into a trigger. A bare threshold is not
-enough: a single sample above it is not evidence of contact, and a detector
-that fires on the first excursion produces nuisance stops. So the residual
-must stay above the threshold for a number of consecutive samples, and once
-triggered it releases only below a lower threshold. Both cost latency and buy
-robustness, and the exchange rate is measured rather than argued.
+M3 gave the observer a wrong model. M4 gives it wrong *measurements*, which
+is the other half of the gap between a simulation and a robot.
 
-Measured on the two-link arm, perfect model, $K = 50$ (time constant
-20 ms):
+There is a specific reason this matters here. The momentum observer was
+chosen precisely to avoid joint acceleration, because differentiating
+position twice amplifies quantisation noise. But it still needs **velocity**,
+and on a real arm velocity is not measured either — it comes from differencing
+encoder counts. One differentiation is not free: with a 17-bit encoder at
+10 kHz, a single count becomes
 
-| Threshold | Detection latency |
+$$\frac{2\pi}{2^{17}} \times 10^{4} \;=\; 0.48\ \text{rad/s}$$
+
+of velocity noise, which is larger than the velocities of interest in slow
+motion.
+
+![Sources of the residual floor](docs/images/residual_floor.png)
+
+### Where the residual floor actually comes from
+
+| Measurement condition | Peak residual, no contact |
 |---|---|
-| 0.5 Nm | 2.2 ms |
-| 1.0 Nm | 4.6 ms |
-| 2.0 Nm | 10.3 ms |
-| 4.0 Nm | 32.2 ms |
+| exact velocity, no torque noise | 0.003 Nm |
+| exact velocity, 0.05 Nm torque noise | 0.010 Nm |
+| **raw encoder difference** | **26.313 Nm** |
+| encoder difference, 50 Hz filter | 0.477 Nm |
+| filtered velocity + torque noise | 0.480 Nm |
 
-| Observer gain | Time constant | Latency at 1 Nm |
+Two results, neither of them the intuitive one.
+
+**Differentiating quantised position destroys the method outright.** A 26 Nm
+residual floor with no contact present, against contacts of a few newton
+metres. Filtering rescues it, reducing the floor by a factor of fifty-five.
+
+**Torque noise is almost irrelevant beside velocity error.** Adding 0.05 Nm
+of torque noise on top of a filtered velocity estimate moves the floor from
+0.477 to 0.480 Nm. That is the opposite of the intuitive ordering — the
+torque measurement is the one that appears explicitly in the residual
+equation — which is exactly why it is worth measuring rather than assuming.
+
+The filter is not free either: it trades noise for lag, and lag on an
+accelerating joint appears in the residual as a torque that is not there.
+Measured under $4\ \text{rad/s}^2$, the velocity estimate trails by 0.021 rad/s against
+the 0.013 the filter time constant predicts.
+
+### With everything present
+
+| Case | Lowest usable threshold | Smallest contact caught |
 |---|---|---|
-| $K = 20$ | 50 ms | 11.3 ms |
-| $K = 50$ | 20 ms | 4.6 ms |
-| $K = 100$ | 10 ms | 2.4 ms |
+| perfect model, ideal sensors | 0.10 Nm | 0.10 Nm |
+| real sensors, perfect model | 1.00 Nm | 0.88 Nm |
+| friction + 5 % parameters, ideal sensors | 4.00 Nm | 5.28 Nm |
+| **everything** | **4.00 Nm** | **4.80 Nm** |
 
-Two further results worth stating:
+### A note on the roadmap
 
-**Minimum detectable torque: 0.9989 Nm at a 1.0 Nm threshold.** Found by
-bisection. The residual converges to the applied torque exactly, so the
-smallest detectable contact is the threshold itself — no signal is lost
-between the contact and the decision.
-
-**Zero false alarms at every threshold tested, down to 0.05 Nm.** That is not
-a result about the method, it is the baseline: with a perfect model and no
-noise there is nothing to trigger on. It is the number M3 destroys by
-introducing friction, and the point of measuring it now is to have something
-to compare against.
-
-### A limit of the method, measured rather than discovered later
-
-A contact shorter than the observer time constant can be missed entirely,
-because the residual never reaches the threshold before the contact ends:
-
-| Contact duration | Fraction of time constant | Outcome |
-|---|---|---|
-| 2 ms | 0.1 | **missed** |
-| 5 ms | 0.25 | detected |
-| 20 ms | 1.0 | detected |
-| 100 ms | 5.0 | detected |
-
-This is a property of any first-order observer, not a defect of this one, and
-it bounds what the method can do: a fast light tap is invisible to it at any
-threshold. Raising $K$ shortens the blind window at the cost of passing more
-model error, which is exactly the trade-off M3 quantifies.
+M4 was originally planned as a fixed-point implementation. That was changed
+because the portfolio already answers "what does integer arithmetic cost"
+twice, in [qdsp](https://github.com/andrealo20/qdsp) and
+[qcsi](https://github.com/andrealo20/qcsi), while sensor realism is directly
+on this project's thesis and was the one remaining gap between the simulation
+and a robot. A fixed-point observer remains a sensible extension and is
+listed as open rather than quietly dropped.
 
 ---
-
-## M1: the observer
-
-`src/observer.c` implements the residual
-
-$$r \;=\; K\left(\, p \;-\; \int_0^t \left[\tau + C(q,\dot{q})^{\top}\dot{q} - g(q) + r\right] \mathrm{d}t \;-\; p(0) \right)$$
-
-which satisfies $\dot{r} = K\,(\tau_{\text{ext}} - r)$ for each joint
-independently: a first-order response whose time constant is $1/K$ and
-nothing else. Everything
-in it is measured — position, velocity, torque — with no acceleration
-anywhere.
-
-Measured on a two-link arm at 10 kHz, with the observer given the same model
-as the plant:
-
-| Measurement | Result |
-|---|---|
-| Residual after 2 s with no contact | 0.0 |
-| Residual against an applied 4.0 / −2.0 Nm | 4.0019 / −2.0004 |
-| Time constant at $K = 20/50/100$ | 0.0498 / 0.0198 / 0.0098 s |
-| Expected $1/K$ | 0.0500 / 0.0200 / 0.0100 s |
-| Contact on joint 0: loaded / unloaded joint | 5.9955 / 0.0005 Nm |
-| Worst residual during free swing | 0.0000 Nm |
-
-### Two things that would otherwise fail silently
-
-**The Coriolis transpose.** The residual needs $C^{\top}$, not $C$. Using the wrong
-one produces a detector that works perfectly at rest and is wrong whenever
-the arm moves — no error, no warning, just residuals that mean nothing. The
-test suite exercises free motion specifically to catch it: substituting $C$
-for $C^{\top}$ takes the free-swing residual from 0.0000 to **7.2 Nm** and fails
-three tests. That check was verified by deliberately breaking the code, which
-is the only way to know a test has teeth.
-
-**The integration rule.** The integrand tracks $\dot{p}$, which grows with joint
-velocity, so forward Euler leaves an error proportional to the timestep times
-the speed of the arm. On a two-link arm driven to 19 rad/s it produced a
-spurious 0.33 Nm on a joint with no external torque at all — well inside the
-range of a real light contact. The trapezoidal rule reduces that by a factor
-of fifteen at the same step:
-
-| Timestep | Spurious residual, forward Euler | Trapezoidal |
-|---|---|---|
-| 1.0e-3 | 0.333 Nm | 0.022 Nm |
-| 5.0e-4 | 0.165 Nm | 0.010 Nm |
-| 2.5e-4 | 0.082 Nm | 0.005 Nm |
-
-Both remain first order overall, because the residual feeds back into its own
-integral explicitly; the trapezoidal rule buys a much smaller constant rather
-than a better rate.
-
----
-
-## M0: the plant
-
-`src/dynamics.c` is an n-link planar arm: mass matrix, Coriolis matrix,
-gravity, forward and inverse dynamics, RK4 integration. Planar keeps the
-algebra small enough to check by hand, which matters because everything else
-in the project is measured against this model.
-
-### Verified against Pinocchio
-<a name="verified-against-pinocchio"></a>
-
-The plant is the reference the observer is judged by, so it cannot be taken
-on trust. An error here would produce an observer that appears to work while
-measuring the wrong thing — and no self-written test catches a shared
-misunderstanding of the model. [Pinocchio](https://github.com/stack-of-tasks/pinocchio)
-is an independent implementation by another group, so agreement rules that
-out. The same arrangement [qdsp](https://github.com/andrealo20/qdsp) has with
-CMSIS-DSP.
-
-```sh
-pip install numpy pin
-python3 tools/check_dynamics.py
-```
-
-Maximum absolute disagreement over 60 random configurations at 1, 2, 3 and 4
-links:
-
-| Quantity | Max difference | Limit |
-|---|---|---|
-| Mass matrix $M(q)$ | 5.3e-15 | 1e-10 |
-| Gravity $g(q)$ | 2.8e-14 | 1e-10 |
-| Coriolis term $C(q,\dot{q})\,\dot{q}$ | 8.1e-09 | 1e-05 |
-| Forward dynamics $\ddot{q}$ | 5.6e-08 | 1e-04 |
-
-The tolerances differ for reasons rather than by taste. M and g are
-closed-form in both implementations and agree to machine precision. The
-Coriolis term goes through central differences here, capping accuracy near
-the square root of machine epsilon. And $\ddot{q}$ inherits the Coriolis error
-amplified by $M^{-1}$ — measured amplification is 2.4x median at n=2 and 3.4x
-at n=4, with the condition number of $M$ reaching 760 — so its tolerance cannot
-be tighter than the Coriolis one. An earlier version set it to 1e-8 and the
-code failed for a reason that had nothing to do with correctness.
-
-### The property the whole project rests on
-
-There are infinitely many matrices $C$ for which $C\dot{q}$ gives the
-correct Coriolis vector. Only one family makes $\dot{M} - 2C$ skew-symmetric, and the
-momentum observer needs that one. Pick another and the observer still runs,
-still produces residuals, and those residuals are wrong in a way nothing else
-would reveal.
-
-So it is tested directly, by differencing M along the trajectory:
-
-| Measurement | Result |
-|---|---|
-| Skew-symmetry residual of $\dot{M} - 2C$ | 4.1e-09 (matrix scale 6.1) |
-| Mass matrix asymmetry | 0 |
-| Smallest Cholesky pivot over 200 poses | 0.032 |
-| Inverse/forward dynamics round trip | 6.4e-14 |
-
-### Integration quality
-
-Energy conservation is checked by *convergence order* rather than against a
-chosen threshold. The distinction matters: a model with a sign error would
-also show small drift at a small step and would pass a threshold test.
-
-| Step | Relative energy drift over 20 s |
-|---|---|
-| 2.0e-3 | 2.33e-05 |
-| 1.0e-3 | 2.51e-06 |
-| 5.0e-4 | 3.89e-07 |
-
-Each halving cuts the drift by roughly an order of magnitude, which is
-fourth-order behaviour. A separate test measures the trajectory error ratio
-directly and gets 18-20 against the expected 16.
-
----
-
 ## What this does not do
 
 Stated because they are the parts a reader should not have to discover.
