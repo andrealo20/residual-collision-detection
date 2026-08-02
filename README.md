@@ -34,20 +34,6 @@ measures, and it is the reason collaborative robots identify their friction
 models carefully rather than trusting CAD inertias: every newton metre of
 unmodelled torque is a newton metre of contact you can no longer feel.
 
-## Status
-
-| Milestone | Contents | Status |
-|---|---|---|
-| M0 | Plant dynamics, verified against Pinocchio | ✅ |
-| M1 | Momentum-based residual observer | ✅ |
-| M2 | Collision injection, detection latency and false alarms | ✅ |
-| M3 | Unmodelled friction and the threshold trade-off | ✅ |
-| M4 | Sensor noise, quantisation and velocity estimation | ✅ |
-| M5 | Figures, full evaluation, stated limitations | ✅ |
-
-45 unit tests. Clean under `-Wall -Wextra -Wpedantic -Wconversion -Werror`,
-ASan and UBSan.
-
 ---
 
 ## Why the naive approach does not work
