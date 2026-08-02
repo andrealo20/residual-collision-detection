@@ -12,7 +12,7 @@
 If you know the dynamic model of an arm, you know what torque a given motion
 requires. The difference between that and the measured torque is what the
 outside world is doing to the robot. Detect it and you have collision
-detection with no force sensor, no skin, and no extra hardware — which is the
+detection with no force sensor, no skin, and no extra hardware, which is the
 mechanism behind collaborative robots that stop when you touch them.
 
 ![Residual following a contact](docs/images/residual_trace.png)
