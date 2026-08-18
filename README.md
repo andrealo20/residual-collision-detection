@@ -63,7 +63,6 @@ $\dot{M} - 2C$ is skew-symmetric, which is why this repository is careful
 about *which* Coriolis matrix it computes, see below. Integrating that
 expression and comparing against the measured momentum gives a residual that
 converges to $\tau_{\text{ext}}$ and is driven by measured quantities only.
-This is De Luca's formulation, and M1 implements it.
 
 ---
 
