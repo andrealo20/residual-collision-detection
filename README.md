@@ -24,7 +24,7 @@ mechanism behind collaborative robots that stop when you touch them.
 the applied value and returns to zero; with ordinary model error and real
 sensors it rides on a floor that any threshold has to clear first.*
 
-## The result in one figure
+## The result 
 
 [![Detection sensitivity against realism](https://github.com/andrealo20/residual-collision-detection/raw/main/docs/images/tradeoff.png)](https://github.com/andrealo20/residual-collision-detection/blob/main/docs/images/tradeoff.png)
 
