@@ -22,13 +22,26 @@ target_include_directories(qcollide PUBLIC
     $<INSTALL_INTERFACE:include>
 )
 
+# The library needs libm whatever the compiler is, so this sits outside the
+# warning-flag block it used to be nested in.
+include(CheckLibraryExists)
+check_library_exists(m cos "" QCOLLIDE_HAVE_LIBM)
+if(QCOLLIDE_HAVE_LIBM)
+    target_link_libraries(qcollide PUBLIC m)
+endif()
+
+# The strict set applies to the library. Tests and benches get the ordinary
+# warnings but not -Wconversion or -Werror: they were not written under those
+# and turning them on would be a separate change with its own diff.
+set(QCOLLIDE_STRICT_FLAGS
+    -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wstrict-prototypes)
+set(QCOLLIDE_COMMON_FLAGS -Wall -Wextra -Wpedantic)
+
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
-    target_compile_options(qcollide PRIVATE
-        -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wstrict-prototypes)
+    target_compile_options(qcollide PRIVATE ${QCOLLIDE_STRICT_FLAGS})
     if(QCOLLIDE_WERROR)
         target_compile_options(qcollide PRIVATE -Werror)
     endif()
-    target_link_libraries(qcollide PUBLIC m)
 endif()
 
 if(QCOLLIDE_BENCH)

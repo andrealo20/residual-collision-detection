@@ -36,6 +36,7 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
 
 #define N 2
 #define DT 1e-4
@@ -77,6 +78,33 @@ static void commanded_torque(const qcollide_model *plant, double t,
     (void)qcollide_inverse_dynamics(plant, q, qd, qdd, tau);
 }
 
+
+/**
+ * External torque seen by the plant: friction, which depends on the joint
+ * velocity, plus the contact, which does not.
+ *
+ * Passed to qcollide_step_ext() so friction is re-evaluated at every
+ * Runge-Kutta stage. Evaluating it once per step and holding it constant, as
+ * this file used to, silently drops the integrator to first order in the
+ * friction term, which is present in most of the cases swept below.
+ */
+typedef struct {
+    const qcollide_friction *fric;
+    const double *contact;   /* constant across the step */
+} plant_ext;
+
+static void plant_ext_torque(const double *q, const double *qd, double *tau_ext,
+                             size_t n, void *user_data)
+{
+    const plant_ext *c = (const plant_ext *)user_data;
+    size_t i;
+    (void)q;
+    qcollide_friction_vector(c->fric, n, qd, tau_ext);
+    for (i = 0u; i < n; ++i) {
+        tau_ext[i] += c->contact[i];
+    }
+}
+
 /**
  * Run the chain once.
  *
@@ -94,10 +122,10 @@ static int run(const config *cfg, const qcollide_contact *contact,
     qcollide_sensor_config scfg;
     double q[N] = { 0.4, -0.3 };
     double qd[N] = { 0.0, 0.0 };
-    double tau[N], ext[N], fr[N], applied[N];
+    double tau[N], ext[N];
     double qm[N], qdm[N], taum[N];
     const int steps = (int)(duration / DT + 0.5);
-    int k, i, fired = 0;
+    int k, fired = 0;
     double worst = 0.0;
 
     (void)qcollide_model_uniform(&plant, N, 1.0, 0.6, 9.81);
@@ -120,7 +148,6 @@ static int run(const config *cfg, const qcollide_contact *contact,
        compared against itself. */
     (void)qcollide_sensors_init(&sens, &scfg, 20260801u);
 
-    commanded_torque(&plant, 0.0, q, qd, tau);
     (void)qcollide_observer_reset(&obs, q, qd);
 
     for (k = 0; k < steps; ++k) {
@@ -131,17 +158,26 @@ static int run(const config *cfg, const qcollide_contact *contact,
 
         /* Friction acts on the plant only. The observer is given the
            commanded torque, exactly as a real controller would report it,
-           and never learns that friction removed some of it. */
-        qcollide_friction_vector(&fric, N, qd, fr);
-        for (i = 0; i < N; ++i) {
-            applied[i] = ext[i] + fr[i];
+           and never learns that friction removed some of it. It is applied
+           through the callback form so that it is re-evaluated at each
+           Runge-Kutta stage rather than frozen at the start of the step. */
+        {
+            plant_ext ctx;
+            ctx.fric = &fric;
+            ctx.contact = ext;
+            (void)qcollide_step_ext(&plant, q, qd, tau,
+                                    plant_ext_torque, &ctx, DT);
         }
-
-        (void)qcollide_step(&plant, q, qd, tau, applied, DT);
 
         /* The observer sees measurements, not the plant state. This is the
            only place the two are distinguished, and keeping it to one place
-           is what makes the ideal-sensor baseline exactly comparable. */
+           is what makes the ideal-sensor baseline exactly comparable.
+
+           Note the one sample offset: the state measured here is the state
+           after the step, while tau is the torque that was applied across it.
+           That is the pairing a real controller reports, the command it just
+           issued alongside the encoder read that followed, so it is kept
+           deliberately rather than corrected. */
         (void)qcollide_sensors_measure(&sens, N, q, qd, tau,
                                        qm, qdm, taum, DT);
         (void)qcollide_observer_update(&obs, qm, qdm, taum, DT);
@@ -204,13 +240,69 @@ static double minimum_detectable(const config *cfg)
     return worst;
 }
 
+/* ------------------------------------------------------------------ */
+/* Collected results                                                   */
+/*                                                                     */
+/* Everything printed below is also stored, so that --json can write it */
+/* out. tools/make_figures.py and tools/check_readme.py read that file  */
+/* rather than carrying transcribed copies of these numbers, which is   */
+/* what they used to do and what let the figures drift away from the    */
+/* measurements they claimed to show.                                  */
+/* ------------------------------------------------------------------ */
+
+#define MAX_THRESHOLDS 8
+#define MAX_CASES 8
+#define MAX_FLOORS 8
+
+typedef struct {
+    double threshold;
+    unsigned events;
+    double min_detectable;   /* negative when nothing was detected below the ceiling */
+    int usable;              /* 0 when the detector fires with no contact present */
+} threshold_row;
+
+typedef struct {
+    const char *title;
+    double friction;
+    double param_error;
+    int sensors;
+    threshold_row rows[MAX_THRESHOLDS];
+    int n_rows;
+} sweep_case;
+
+typedef struct {
+    double severity;
+    double floor;
+} floor_row;
+
+typedef struct {
+    const char *name;
+    double floor;
+} named_floor_row;
+
+static sweep_case g_cases[MAX_CASES];
+static int g_n_cases = 0;
+static floor_row g_friction_floors[MAX_FLOORS];
+static int g_n_friction = 0;
+static floor_row g_param_floors[MAX_FLOORS];
+static int g_n_param = 0;
+static named_floor_row g_sensor_floors[MAX_FLOORS];
+static int g_n_sensor = 0;
+
 static void sweep_full(const char *title, double friction, double param_error,
                        int sensors, double torque_noise,
                        qcollide_velocity_mode vel_mode)
 {
     const double thresholds[7] = { 0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0 };
     config cfg;
+    sweep_case *rec = &g_cases[g_n_cases++];
     int i;
+
+    rec->title = title;
+    rec->friction = friction;
+    rec->param_error = param_error;
+    rec->sensors = sensors;
+    rec->n_rows = 0;
 
     cfg.friction_scale = friction;
     cfg.param_error = param_error;
@@ -227,12 +319,18 @@ static void sweep_full(const char *title, double friction, double param_error,
     for (i = 0; i < 7; ++i) {
         unsigned events = 0u;
         double mdt = -1.0;
+        threshold_row *row = &rec->rows[rec->n_rows++];
 
         cfg.threshold = thresholds[i];
         (void)run(&cfg, NULL, 4.5, &events, NULL);
         if (events == 0u) {
             mdt = minimum_detectable(&cfg);
         }
+
+        row->threshold = thresholds[i];
+        row->events = events;
+        row->min_detectable = mdt;
+        row->usable = (events == 0u);
 
         printf("| %.2f Nm | %u | ", thresholds[i], events);
         if (events > 0u) {
@@ -249,11 +347,92 @@ static void sweep_full(const char *title, double friction, double param_error,
     }
 }
 
-int main(void)
+/* ------------------------------------------------------------------ */
+/* Machine-readable output                                             */
+/* ------------------------------------------------------------------ */
+
+static void write_json(const char *path)
+{
+    FILE *f = fopen(path, "w");
+    int c, i;
+
+    if (f == NULL) {
+        fprintf(stderr, "could not open %s for writing\n", path);
+        return;
+    }
+
+    fprintf(f, "{\n");
+    fprintf(f, "  \"gain\": 50.0,\n");
+    fprintf(f, "  \"confirm_samples\": 3,\n");
+    fprintf(f, "  \"dt\": %g,\n", DT);
+
+    fprintf(f, "  \"friction_floors\": [");
+    for (i = 0; i < g_n_friction; ++i) {
+        fprintf(f, "%s\n    {\"scale\": %.6g, \"floor\": %.6f}",
+                i ? "," : "", g_friction_floors[i].severity,
+                g_friction_floors[i].floor);
+    }
+    fprintf(f, "\n  ],\n");
+
+    fprintf(f, "  \"parameter_floors\": [");
+    for (i = 0; i < g_n_param; ++i) {
+        fprintf(f, "%s\n    {\"error\": %.6g, \"floor\": %.6f}",
+                i ? "," : "", g_param_floors[i].severity,
+                g_param_floors[i].floor);
+    }
+    fprintf(f, "\n  ],\n");
+
+    fprintf(f, "  \"sensor_floors\": [");
+    for (i = 0; i < g_n_sensor; ++i) {
+        fprintf(f, "%s\n    {\"case\": \"%s\", \"floor\": %.6f}",
+                i ? "," : "", g_sensor_floors[i].name,
+                g_sensor_floors[i].floor);
+    }
+    fprintf(f, "\n  ],\n");
+
+    fprintf(f, "  \"cases\": [");
+    for (c = 0; c < g_n_cases; ++c) {
+        const sweep_case *sc = &g_cases[c];
+        fprintf(f, "%s\n    {\n      \"title\": \"%s\",\n", c ? "," : "", sc->title);
+        fprintf(f, "      \"friction_scale\": %.6g,\n", sc->friction);
+        fprintf(f, "      \"parameter_error\": %.6g,\n", sc->param_error);
+        fprintf(f, "      \"sensors\": %s,\n", sc->sensors ? "true" : "false");
+        fprintf(f, "      \"thresholds\": [");
+        for (i = 0; i < sc->n_rows; ++i) {
+            const threshold_row *r = &sc->rows[i];
+            fprintf(f, "%s\n        {\"threshold\": %.4f, \"false_alarms\": %u, "
+                       "\"usable\": %s, \"min_detectable\": ",
+                    i ? "," : "", r->threshold, r->events,
+                    r->usable ? "true" : "false");
+            if (r->usable && r->min_detectable >= 0.0) {
+                fprintf(f, "%.4f}", r->min_detectable);
+            } else {
+                fprintf(f, "null}");
+            }
+        }
+        fprintf(f, "\n      ]\n    }");
+    }
+    fprintf(f, "\n  ]\n}\n");
+
+    fclose(f);
+    fprintf(stderr, "wrote %s\n", path);
+}
+
+int main(int argc, char **argv)
 {
     config probe;
     double peak;
+    const char *json_path = NULL;
     int i;
+
+    for (i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "--json") == 0 && i + 1 < argc) {
+            json_path = argv[++i];
+        } else {
+            fprintf(stderr, "usage: %s [--json PATH]\n", argv[0]);
+            return 2;
+        }
+    }
 
     printf("# qcollide - threshold trade-off under model error\n\n");
     printf("Two-link arm, sinusoidal trajectory at 0.4 Hz, observer gain "
@@ -276,6 +455,9 @@ int main(void)
             probe.friction_scale = frictions[i];
             probe.param_error = 0.0;
             (void)run(&probe, NULL, 3.0, NULL, &peak);
+            g_friction_floors[g_n_friction].severity = frictions[i];
+            g_friction_floors[g_n_friction].floor = peak;
+            g_n_friction++;
             printf("| friction x%.2f | %.3f Nm |\n", frictions[i], peak);
         }
     }
@@ -285,6 +467,9 @@ int main(void)
             probe.friction_scale = 0.0;
             probe.param_error = errors[i];
             (void)run(&probe, NULL, 3.0, NULL, &peak);
+            g_param_floors[g_n_param].severity = errors[i];
+            g_param_floors[g_n_param].floor = peak;
+            g_n_param++;
             printf("| inertia +%.0f%% | %.3f Nm |\n", errors[i] * 100.0, peak);
         }
     }
@@ -308,6 +493,9 @@ int main(void)
             probe.torque_noise = cases[i].noise;
             probe.vel_mode = cases[i].m;
             (void)run(&probe, NULL, 3.0, NULL, &peak);
+            g_sensor_floors[g_n_sensor].name = cases[i].name;
+            g_sensor_floors[g_n_sensor].floor = peak;
+            g_n_sensor++;
             printf("| %s | %.3f Nm |\n", cases[i].name, peak);
         }
     }
@@ -334,5 +522,9 @@ int main(void)
            "meaningful: under friction it depends on whether the contact "
            "happens to arrive while the model error is already pushing the "
            "residual upwards.\n");
+
+    if (json_path != NULL) {
+        write_json(json_path);
+    }
     return 0;
 }

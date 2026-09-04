@@ -22,6 +22,16 @@ qcollide_status qcollide_observer_init(qcollide_observer *o,
     }
 
     o->model = model;
+    /* Zero the whole arrays, not just the first n. qcollide_observer_residual
+       returns the entire buffer, so a caller reading past n would otherwise
+       see whatever was on the stack. */
+    for (i = 0u; i < QCOLLIDE_MAX_DOF; ++i) {
+        o->gain[i] = 0.0;
+        o->integral[i] = 0.0;
+        o->residual[i] = 0.0;
+        o->p0[i] = 0.0;
+        o->prev[i] = 0.0;
+    }
     for (i = 0u; i < model->n; ++i) {
         o->gain[i] = gain[i];
         o->integral[i] = 0.0;

@@ -44,6 +44,7 @@ void qcollide_friction_vector(const qcollide_friction *f, size_t n,
 {
     size_t i;
     if (qd == NULL || tau_f == NULL) return;
+    if (n > QCOLLIDE_MAX_DOF) return;   /* the caller's n, as in sensors.c */
     for (i = 0u; i < n; ++i) {
         tau_f[i] = qcollide_friction_torque(f, qd[i]);
     }

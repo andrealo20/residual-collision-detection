@@ -120,6 +120,11 @@ qcollide_status qcollide_sensors_measure(qcollide_sensors *s, size_t n,
         q_meas == NULL || qd_meas == NULL || tau_meas == NULL || !(dt > 0.0)) {
         return QCOLLIDE_ERR_ARG;
     }
+    /* n is the caller's, unlike everywhere else in the library where it comes
+       from a validated model, and it indexes s->last_q and s->vel. */
+    if (n > QCOLLIDE_MAX_DOF) {
+        return QCOLLIDE_ERR_ARG;
+    }
 
     if (s->cfg.velocity_mode == QCOLLIDE_VEL_FILTERED) {
         /* First-order low pass, discretised as a one-pole recursion. The

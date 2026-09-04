@@ -76,6 +76,10 @@ void qcollide_contact_torque(const qcollide_contact *c, size_t n,
     int active;
 
     if (tau_ext == NULL) return;
+    /* c->torque is QCOLLIDE_MAX_DOF wide and n is the caller's, so a larger n
+       would read past it. Nothing is written in that case: a silently
+       truncated contact would be worse than none. */
+    if (n > QCOLLIDE_MAX_DOF) return;
     for (i = 0u; i < n; ++i) {
         tau_ext[i] = 0.0;
     }

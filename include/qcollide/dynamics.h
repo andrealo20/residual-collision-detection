@@ -68,7 +68,8 @@ typedef struct {
  * Initialise a model from link parameters.
  *
  * @return QCOLLIDE_OK, or QCOLLIDE_ERR_ARG on a null pointer, n outside
- *         1..QCOLLIDE_MAX_DOF, or a non-positive mass or length.
+ *         1..QCOLLIDE_MAX_DOF, a non-positive mass or length, a negative
+ *         inertia, or a centre of mass outside [0, length].
  */
 qcollide_status qcollide_model_init(qcollide_model *m,
                                     const qcollide_link *links,
@@ -153,6 +154,40 @@ qcollide_status qcollide_inverse_dynamics(const qcollide_model *m,
 qcollide_status qcollide_step(const qcollide_model *m, double *q, double *qd,
                               const double *tau, const double *tau_ext,
                               double dt);
+
+/**
+ * External joint torque as a function of state, for qcollide_step_ext().
+ *
+ * @param q, qd     state at the stage being evaluated.
+ * @param tau_ext   output, n elements.
+ * @param n         number of joints.
+ * @param user_data whatever was handed to qcollide_step_ext().
+ */
+typedef void (*qcollide_ext_torque_fn)(const double *q, const double *qd,
+                                       double *tau_ext, size_t n,
+                                       void *user_data);
+
+/**
+ * One fixed-step integration with a state-dependent external torque.
+ *
+ * qcollide_step() holds tau_ext constant across all four Runge-Kutta stages,
+ * which is right for a commanded torque under zero-order hold but wrong for
+ * anything that depends on the state. Friction is the case that matters here:
+ * evaluating it once at the start of the step and freezing it reduces that
+ * term to first order, so the integrator stops being fourth order exactly
+ * when friction is switched on, which is the configuration the sweep spends
+ * most of its time in.
+ *
+ * This variant evaluates the callback at each stage instead.
+ * qcollide_step() is implemented in terms of it, with a callback that returns
+ * the same vector every time, so there is one integrator rather than two.
+ *
+ * @param ext_fn may be NULL, meaning no external torque.
+ */
+qcollide_status qcollide_step_ext(const qcollide_model *m, double *q, double *qd,
+                                  const double *tau,
+                                  qcollide_ext_torque_fn ext_fn, void *user_data,
+                                  double dt);
 
 #ifdef __cplusplus
 }

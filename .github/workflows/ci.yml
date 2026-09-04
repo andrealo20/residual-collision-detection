@@ -86,12 +86,27 @@ jobs:
       # The sweep is deterministic: a change in these tables between commits
       # is a change in behaviour, not measurement noise.
       - name: Trade-off sweep
-        run: ./build/bench/qcollide_sweep | tee -a "$GITHUB_STEP_SUMMARY"
+        run: |
+          mkdir -p docs/data
+          ./build/bench/qcollide_sweep --json docs/data/sweep.json             | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The tables in the README quote these numbers. Nothing used to connect
+      # the two, and the figures were drawn from constants transcribed by hand.
+      - name: Check the README against the sweep
+        run: python3 tools/check_readme.py docs/data/sweep.json
 
       - name: Regenerate figures
         run: |
           pip install numpy matplotlib
-          mkdir -p docs/data
           ./build/bench/qcollide_trace 0.0 0.00 0 > docs/data/trace_ideal.csv
           ./build/bench/qcollide_trace 1.0 0.05 1 > docs/data/trace_realistic.csv
           python3 tools/make_figures.py
+
+      - name: Upload the measurements and the figures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: measurements
+          path: |
+            docs/data/sweep.json
+            docs/images/

@@ -24,6 +24,12 @@ qcollide_status qcollide_model_init(qcollide_model *m,
             links[i].inertia < 0.0) {
             return QCOLLIDE_ERR_ARG;
         }
+        /* A centre of mass outside the link is the same class of mistake as a
+           negative mass: not an unusual robot, a typo. Caught here rather than
+           as a mass matrix that is quietly wrong. */
+        if (links[i].com < 0.0 || links[i].com > links[i].length) {
+            return QCOLLIDE_ERR_ARG;
+        }
         m->link[i] = links[i];
     }
     m->n = n;
@@ -329,10 +335,30 @@ double qcollide_energy(const qcollide_model *m,
 /* Forward and inverse dynamics                                        */
 /* ------------------------------------------------------------------ */
 
-/** Solve A x = b in place by Gauss-Jordan with partial pivoting. */
-static int solve_spd(double *A, double *b, size_t n)
+/**
+ * Solve A x = b in place by Gauss-Jordan with partial pivoting.
+ *
+ * Named for what it does. It was called solve_spd, which promised a Cholesky
+ * factorisation exploiting the symmetry and positive definiteness of the mass
+ * matrix; this is the general method, and the name should not claim otherwise.
+ */
+static int solve_linear_system(double *A, double *b, size_t n)
 {
     size_t i, j, k;
+    double scale = 0.0;
+    double pivot_floor;
+
+    /* The singularity test has to be relative to the size of the entries. An
+       absolute floor treats a model expressed in grams and millimetres, whose
+       mass matrix is legitimately of order 1e-9, as singular. */
+    for (i = 0u; i < n * n; ++i) {
+        const double v = fabs(A[i]);
+        if (v > scale) { scale = v; }
+    }
+    if (!(scale > 0.0)) {
+        return 0;
+    }
+    pivot_floor = 1e-12 * scale;
 
     for (k = 0u; k < n; ++k) {
         size_t piv = k;
@@ -345,7 +371,7 @@ static int solve_spd(double *A, double *b, size_t n)
            pivot means the parameters are wrong, not that the configuration
            is awkward. Reporting rather than continuing keeps that
            distinction visible. */
-        if (best < 1e-12) {
+        if (best < pivot_floor) {
             return 0;
         }
         if (piv != k) {
@@ -403,7 +429,7 @@ qcollide_status qcollide_forward_dynamics(const qcollide_model *m,
         rhs[i] = tau[i] - cq - g[i] + ((tau_ext != NULL) ? tau_ext[i] : 0.0);
     }
 
-    if (!solve_spd(M, rhs, n)) {
+    if (!solve_linear_system(M, rhs, n)) {
         return QCOLLIDE_ERR_RANGE;
     }
     for (i = 0u; i < n; ++i) {
@@ -444,19 +470,42 @@ qcollide_status qcollide_inverse_dynamics(const qcollide_model *m,
 /* Integration                                                         */
 /* ------------------------------------------------------------------ */
 
-qcollide_status qcollide_step(const qcollide_model *m, double *q, double *qd,
-                              const double *tau, const double *tau_ext,
-                              double dt)
+/**
+ * External torque held constant across the step, which is what the plain
+ * qcollide_step() promises. Used to express it in terms of the callback form
+ * so there is one integrator rather than two.
+ */
+typedef struct {
+    const double *tau_ext;
+} qcollide_const_ext;
+
+static void qcollide_const_ext_fn(const double *q, const double *qd,
+                                  double *tau_ext, size_t n, void *user_data)
 {
-    /* Zero-initialised because the compiler cannot prove n > 0 from the
-       model invariant, and warns at -O2. The invariant does hold -- model
-       init rejects n == 0 -- so this costs a few stores and removes a
-       warning that would otherwise have to be suppressed. */
+    const qcollide_const_ext *c = (const qcollide_const_ext *)user_data;
+    size_t i;
+    (void)q;
+    (void)qd;
+    for (i = 0u; i < n; ++i) {
+        tau_ext[i] = (c->tau_ext != NULL) ? c->tau_ext[i] : 0.0;
+    }
+}
+
+qcollide_status qcollide_step_ext(const qcollide_model *m, double *q, double *qd,
+                                  const double *tau,
+                                  qcollide_ext_torque_fn ext_fn, void *user_data,
+                                  double dt)
+{
+    /* Zero-initialised because the compiler cannot prove n > 0 from the model
+       invariant, and warns at -O2. The invariant does hold -- model init
+       rejects n == 0 -- so this costs a few stores and removes a warning that
+       would otherwise have to be suppressed. */
     double k1q[QCOLLIDE_MAX_DOF] = { 0 }, k1v[QCOLLIDE_MAX_DOF] = { 0 };
     double k2q[QCOLLIDE_MAX_DOF] = { 0 }, k2v[QCOLLIDE_MAX_DOF] = { 0 };
     double k3q[QCOLLIDE_MAX_DOF] = { 0 }, k3v[QCOLLIDE_MAX_DOF] = { 0 };
     double k4q[QCOLLIDE_MAX_DOF] = { 0 }, k4v[QCOLLIDE_MAX_DOF] = { 0 };
     double tq[QCOLLIDE_MAX_DOF] = { 0 }, tv[QCOLLIDE_MAX_DOF] = { 0 };
+    double ext[QCOLLIDE_MAX_DOF] = { 0 };
     size_t i, n;
     qcollide_status st;
 
@@ -465,31 +514,39 @@ qcollide_status qcollide_step(const qcollide_model *m, double *q, double *qd,
     }
     n = m->n;
 
-    st = qcollide_forward_dynamics(m, q, qd, tau, tau_ext, k1v);
+    /* Stage 1 */
+    if (ext_fn != NULL) { ext_fn(q, qd, ext, n, user_data); }
+    st = qcollide_forward_dynamics(m, q, qd, tau, ext, k1v);
     if (st != QCOLLIDE_OK) return st;
     for (i = 0u; i < n; ++i) k1q[i] = qd[i];
 
+    /* Stage 2 */
     for (i = 0u; i < n; ++i) {
         tq[i] = q[i] + 0.5 * dt * k1q[i];
         tv[i] = qd[i] + 0.5 * dt * k1v[i];
     }
-    st = qcollide_forward_dynamics(m, tq, tv, tau, tau_ext, k2v);
+    if (ext_fn != NULL) { ext_fn(tq, tv, ext, n, user_data); }
+    st = qcollide_forward_dynamics(m, tq, tv, tau, ext, k2v);
     if (st != QCOLLIDE_OK) return st;
     for (i = 0u; i < n; ++i) k2q[i] = tv[i];
 
+    /* Stage 3 */
     for (i = 0u; i < n; ++i) {
         tq[i] = q[i] + 0.5 * dt * k2q[i];
         tv[i] = qd[i] + 0.5 * dt * k2v[i];
     }
-    st = qcollide_forward_dynamics(m, tq, tv, tau, tau_ext, k3v);
+    if (ext_fn != NULL) { ext_fn(tq, tv, ext, n, user_data); }
+    st = qcollide_forward_dynamics(m, tq, tv, tau, ext, k3v);
     if (st != QCOLLIDE_OK) return st;
     for (i = 0u; i < n; ++i) k3q[i] = tv[i];
 
+    /* Stage 4 */
     for (i = 0u; i < n; ++i) {
         tq[i] = q[i] + dt * k3q[i];
         tv[i] = qd[i] + dt * k3v[i];
     }
-    st = qcollide_forward_dynamics(m, tq, tv, tau, tau_ext, k4v);
+    if (ext_fn != NULL) { ext_fn(tq, tv, ext, n, user_data); }
+    st = qcollide_forward_dynamics(m, tq, tv, tau, ext, k4v);
     if (st != QCOLLIDE_OK) return st;
     for (i = 0u; i < n; ++i) k4q[i] = tv[i];
 
@@ -498,4 +555,13 @@ qcollide_status qcollide_step(const qcollide_model *m, double *q, double *qd,
         qd[i] += dt / 6.0 * (k1v[i] + 2.0 * k2v[i] + 2.0 * k3v[i] + k4v[i]);
     }
     return QCOLLIDE_OK;
+}
+
+qcollide_status qcollide_step(const qcollide_model *m, double *q, double *qd,
+                              const double *tau, const double *tau_ext,
+                              double dt)
+{
+    qcollide_const_ext holder;
+    holder.tau_ext = tau_ext;
+    return qcollide_step_ext(m, q, qd, tau, qcollide_const_ext_fn, &holder, dt);
 }

@@ -42,8 +42,10 @@ unmodelled torque is a newton metre of contact you can no longer feel.
 | M4 | Sensor noise, quantisation and velocity estimation | ✅ |
 | M5 | Figures, full evaluation, stated limitations | ✅ |
 
-45 unit tests. Clean under `-Wall -Wextra -Wpedantic -Wconversion -Werror`,
-ASan and UBSan.
+45 unit tests. The library compiles clean under `-Wall -Wextra -Wpedantic
+-Wconversion -Wshadow -Wstrict-prototypes -Werror`; the tests and benches use
+`-Wall -Wextra -Wpedantic` without `-Werror`, since they were not written
+under the stricter set. Everything runs under ASan and UBSan.
 
 ---
 
@@ -134,6 +136,17 @@ the 0.013 the filter time constant predicts.
 | real sensors, perfect model | 1.00 Nm | 0.88 Nm |
 | friction + 5 % parameters, ideal sensors | 4.00 Nm | 5.28 Nm |
 | **everything** | **4.00 Nm** | **4.80 Nm** |
+
+The last two rows are worth pausing on: adding sensor error to the
+friction-and-parameter case moves the smallest detectable contact from 5.28 Nm
+*down* to 4.80 Nm. More error, better sensitivity, which cannot be right as a
+statement about the method. It is an artefact of the statistic. The figure is
+a worst case over five contact phases, and it is the largest of five bisection
+results rather than an average, so it is not monotone in anything: noise that
+happens to push the residual over the threshold at the hardest phase lowers
+the maximum. Two of the three lines above are the ones to quote; this pair
+says the phase sampling is too coarse to separate them, and a finer sweep over
+contact phases is the fix. It is recorded here rather than smoothed over.
 
 ### A note on the roadmap
 
@@ -403,9 +416,14 @@ also show small drift at a small step and would pass a threshold test.
 | 1.0e-3 | 2.51e-06 |
 | 5.0e-4 | 3.89e-07 |
 
-Each halving cuts the drift by roughly an order of magnitude, which is
-fourth-order behaviour. A separate test measures the trajectory error ratio
-directly and gets 18-20 against the expected 16.
+Each halving cuts the drift by a factor of 9.3 and then 6.5. Those are not
+the factor of 16 a fourth-order method gives on a smooth error term, because
+this drift is a maximum over the trajectory rather than a local truncation
+error, and the maximum is not a smooth function of the step. What they do rule
+out is a first- or second-order scheme, which would give 2 and 4. The direct
+measurement of the order is the separate test that halves the step and
+compares trajectories against a fine reference: it gets a ratio of 18 to 20
+against the 16 expected, which is the fourth-order evidence.
 
 ---
 

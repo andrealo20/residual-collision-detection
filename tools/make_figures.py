@@ -2,13 +2,19 @@
 """
 Regenerate the figures used in the README.
 
-Every number plotted comes from a measurement rather than a model: the traces
-from bench/qcollide_trace, the residual floors and threshold trade-offs from
-bench/qcollide_sweep and the test suite. The script exists so the figures can
-be rebuilt when the measurements change, and so that where each one came from
-is written down rather than remembered.
+Every number plotted is read from a measurement: the traces from
+bench/qcollide_trace, the residual floors and the threshold trade-off from the
+JSON that bench/qcollide_sweep writes with --json.
+
+That last part used to be a lie. The floor and trade-off figures were drawn
+from lists of numbers transcribed into this file by hand, so re-running the
+sweep changed the tables and left the figures showing whatever had been typed
+in last, while the README claimed the figures could not drift from the numbers
+they illustrate. There are no constants here now, and a missing input is an
+error rather than a fallback.
 
 Usage:
+    ./build/bench/qcollide_sweep --json docs/data/sweep.json
     ./build/bench/qcollide_trace 0.0 0.00 0 > docs/data/trace_ideal.csv
     ./build/bench/qcollide_trace 1.0 0.05 1 > docs/data/trace_realistic.csv
     python3 tools/make_figures.py [output_dir]
@@ -17,6 +23,7 @@ Requires: numpy, matplotlib.
 """
 
 import csv
+import json
 import os
 import sys
 
@@ -34,26 +41,32 @@ DARK = "#334155"
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 DATA = os.path.join(ROOT, "docs", "data")
+SWEEP_JSON = os.path.join(DATA, "sweep.json")
 
-# --- measured: bench/qcollide_sweep and tests/test_sensors ----------------
-FLOOR_FRICTION = [(0.00, 0.001), (0.25, 0.603), (0.50, 1.101), (1.00, 1.866)]
-FLOOR_PARAM = [(0.00, 0.001), (0.02, 0.178), (0.05, 0.445), (0.10, 0.890)]
-FLOOR_SENSOR = [
-    ("exact velocity", 0.003),
-    ("+ torque noise", 0.010),
-    ("raw encoder\ndifference", 26.313),
-    ("+ 50 Hz filter", 0.477),
-    ("+ torque noise", 0.480),
-]
 
-# --- measured: bench/qcollide_sweep --------------------------------------
-CASES = [
-    ("perfect model\nideal sensors", 0.10, 0.10),
-    ("real sensors\nperfect model", 1.00, 0.88),
-    ("friction only\nideal sensors", 2.00, 3.61),
-    ("friction + 5%\nparameters", 4.00, 5.28),
-    ("everything", 4.00, 4.80),
-]
+def load_sweep():
+    """Read the sweep results, or say how to produce them."""
+    if not os.path.exists(SWEEP_JSON):
+        raise SystemExit(
+            f"{SWEEP_JSON} not found. Produce it first:\n"
+            "    cmake -S . -B build -DCMAKE_BUILD_TYPE=Release\n"
+            "    cmake --build build --parallel\n"
+            "    ./build/bench/qcollide_sweep --json docs/data/sweep.json\n"
+        )
+    with open(SWEEP_JSON, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def lowest_usable(case):
+    """The lowest threshold that does not fire on model error alone.
+
+    Returns (threshold, smallest contact detected there), or None when every
+    threshold in the sweep either chatters or misses everything.
+    """
+    for row in sorted(case["thresholds"], key=lambda r: r["threshold"]):
+        if row["usable"] and row["min_detectable"] is not None:
+            return row["threshold"], row["min_detectable"]
+    return None
 
 
 def style(ax):
@@ -71,7 +84,7 @@ def load_trace(name):
     if not os.path.exists(path):
         raise SystemExit(f"{path} not found: run bench/qcollide_trace first")
     t, mag, ext = [], [], []
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         for row in csv.DictReader(f):
             t.append(float(row["t"]))
             mag.append(float(row["magnitude"]))
@@ -88,15 +101,12 @@ def fig_trace(outdir):
     fig.subplots_adjust(hspace=0.35)
 
     for ax, name, title in (
-        (axes[0], "trace_ideal.csv",
-         "Perfect model, ideal sensors"),
+        (axes[0], "trace_ideal.csv", "Perfect model, ideal sensors"),
         (axes[1], "trace_realistic.csv",
          "Friction, 5% parameter error, real sensors"),
     ):
         t, mag, ext = load_trace(name)
 
-        # Shade the contact window, so the reader can see the residual rise
-        # inside it rather than having to infer the timing.
         inside = ext > 0
         if inside.any():
             ax.axvspan(t[inside].min(), t[inside].max(), color=ACCENT,
@@ -124,48 +134,46 @@ def fig_trace(outdir):
     return path
 
 
-def fig_floors(outdir):
+def fig_floors(sweep, outdir):
     """Where the residual floor comes from."""
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.5, 4.0))
-    # Horizontal room for the same reason: the x-tick labels of the left
-    # panel otherwise reach the y-tick labels of the right one.
     fig.subplots_adjust(wspace=0.32)
 
-    # Model error, linear scale: the two sources are comparable in size.
-    fx = [v * 100 for v, _ in FLOOR_FRICTION]
-    fy = [f for _, f in FLOOR_FRICTION]
-    px = [v * 100 for v, _ in FLOOR_PARAM]
-    py = [f for _, f in FLOOR_PARAM]
+    fx = [r["scale"] * 100 for r in sweep["friction_floors"]]
+    fy = [r["floor"] for r in sweep["friction_floors"]]
+    px = [r["error"] * 100 for r in sweep["parameter_floors"]]
+    py = [r["floor"] for r in sweep["parameter_floors"]]
 
     ax1.plot(fx, fy, "o-", color=ACCENT, linewidth=2, markersize=6,
              zorder=3, label="friction (% of typical)")
     ax1.plot(px, py, "s-", color=DARK, linewidth=2, markersize=5,
              zorder=3, label="inertia error (%)")
     ax1.set_xlabel("severity (%)")
-    # Capped at the data: the automatic limit ran to 120 % and its tick label
-    # reached the log-scale labels of the right-hand panel.
-    ax1.set_xlim(-4, 104)
+    ax1.set_xlim(-4, max(fx + px) * 1.04)
     ax1.set_ylabel("residual floor (Nm)")
     ax1.set_title("Model error", color=INK, fontsize=11, loc="left", pad=8)
     ax1.legend(frameon=False, fontsize=9)
     style(ax1)
 
-    # Sensors, log scale: the raw difference is two orders of magnitude
-    # above everything else, and a linear axis would hide the rest entirely.
-    labels = [n for n, _ in FLOOR_SENSOR]
-    vals = [v for _, v in FLOOR_SENSOR]
-    colours = [DARK, DARK, ACCENT, DARK, DARK]
+    # Log scale: the raw difference is two orders of magnitude above
+    # everything else, and a linear axis would hide the rest entirely.
+    rows = sweep["sensor_floors"]
+    labels = [r["case"].replace(", ", ",\n") for r in rows]
+    vals = [r["floor"] for r in rows]
+    worst = max(range(len(vals)), key=lambda i: vals[i])
+    colours = [ACCENT if i == worst else DARK for i in range(len(vals))]
+
     ax2.bar(range(len(vals)), vals, color=colours, zorder=3, width=0.6)
     ax2.set_yscale("log")
     ax2.set_xticks(range(len(vals)))
-    ax2.set_xticklabels(labels, fontsize=8)
+    ax2.set_xticklabels(labels, fontsize=7.5)
     ax2.set_ylabel("residual floor (Nm), log scale")
     ax2.set_title("Sensors", color=INK, fontsize=11, loc="left", pad=8)
     for i, v in enumerate(vals):
         ax2.annotate(f"{v:.3f}", (i, v), textcoords="offset points",
                      xytext=(0, 4), ha="center", fontsize=8, color=INK,
                      zorder=4)
-    ax2.set_ylim(1e-3, 200)
+    ax2.set_ylim(min(v for v in vals if v > 0) * 0.3, max(vals) * 8)
     style(ax2)
 
     fig.suptitle("What raises the residual when nothing is touching the arm",
@@ -177,14 +185,22 @@ def fig_floors(outdir):
     return path
 
 
-def fig_tradeoff(outdir):
+def fig_tradeoff(sweep, outdir):
     """Lowest usable threshold and the smallest contact it still catches."""
-    fig, ax = plt.subplots(figsize=(8.2, 4.2))
+    names, thr, mdt = [], [], []
+    for case in sweep["cases"]:
+        found = lowest_usable(case)
+        if found is None:
+            continue
+        names.append(case["title"].replace(", ", ",\n").replace(": ", ":\n"))
+        thr.append(found[0])
+        mdt.append(found[1])
 
-    names = [c[0] for c in CASES]
-    thr = [c[1] for c in CASES]
-    mdt = [c[2] for c in CASES]
-    x = np.arange(len(CASES))
+    if not names:
+        raise SystemExit("no case in the sweep has a usable threshold")
+
+    fig, ax = plt.subplots(figsize=(8.6, 4.4))
+    x = np.arange(len(names))
     width = 0.38
 
     b1 = ax.bar(x - width / 2, thr, width, color=DARK, zorder=3,
@@ -200,16 +216,18 @@ def fig_tradeoff(outdir):
                         ha="center", fontsize=8, color=INK, zorder=4)
 
     ax.set_xticks(x)
-    ax.set_xticklabels(names, fontsize=8.5)
+    ax.set_xticklabels(names, fontsize=7.5)
     ax.set_ylabel("torque (Nm)")
-    ax.set_ylim(0, 6.6)
+    ax.set_ylim(0, max(thr + mdt) * 1.25)
     ax.set_title("Detection sensitivity against realism", color=INK,
                  fontsize=11, loc="left", pad=8)
     ax.legend(frameon=False, fontsize=9, loc="upper left")
     style(ax)
 
-    fig.suptitle("A 0.1 Nm touch becomes a 4.8 Nm push once ordinary model "
-                 "error and sensors are present",
+    best = min(mdt)
+    worst = max(mdt)
+    fig.suptitle(f"A {best:.2f} Nm touch becomes a {worst:.2f} Nm push once "
+                 "ordinary model error and sensors are present",
                  color=MUTED, fontsize=9, y=1.02, x=0.005, ha="left")
     fig.tight_layout()
     path = os.path.join(outdir, "tradeoff.png")
@@ -219,11 +237,14 @@ def fig_tradeoff(outdir):
 
 
 def main():
-    outdir = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "docs",
-                                                                "images")
+    outdir = (sys.argv[1] if len(sys.argv) > 1
+              else os.path.join(ROOT, "docs", "images"))
     os.makedirs(outdir, exist_ok=True)
-    for fn in (fig_trace, fig_floors, fig_tradeoff):
-        print("wrote", fn(outdir))
+    sweep = load_sweep()
+
+    print("wrote", fig_trace(outdir))
+    print("wrote", fig_floors(sweep, outdir))
+    print("wrote", fig_tradeoff(sweep, outdir))
     return 0
 
 

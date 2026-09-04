@@ -17,12 +17,20 @@
  * A Stribeck friction curve, which is the standard form in the robot
  * identification literature:
  *
- *     tau_f(qd) = ( Fc + (Fs - Fc) exp(-|qd/vs|^d) ) sign(qd)  +  Fv qd
+ *     tau_f(qd) = -[ ( Fc + (Fs - Fc) exp(-|qd/vs|) ) sign(qd)  +  Fv qd ]
  *
  * with Fc the Coulomb level, Fs the higher static level at breakaway, vs the
  * Stribeck velocity over which the transition happens, and Fv the viscous
  * coefficient. The exponential term is what produces the characteristic dip
  * as the joint starts moving.
+ *
+ * The leading minus sign is not decoration. The bracket is the magnitude
+ * opposing motion, which is the form usually written on the left of the
+ * equation of motion and subtracted; qcollide_friction_torque() returns the
+ * negated version, so a caller adds it to the joint torque. The two
+ * conventions differ by exactly this sign and getting it backwards produces a
+ * plant that gains energy, so the formula is written the way the code returns
+ * it. The Stribeck exponent is 1 here, not a free parameter.
  *
  * The parameter values used in the experiments are representative of
  * collaborative-robot joints rather than identified from a specific arm, and

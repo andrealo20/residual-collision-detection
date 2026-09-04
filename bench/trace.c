@@ -21,6 +21,33 @@
 #define DT 1e-4
 static const double PI = 3.14159265358979323846;
 
+
+/**
+ * External torque seen by the plant: friction, which depends on the joint
+ * velocity, plus the contact, which does not.
+ *
+ * Passed to qcollide_step_ext() so friction is re-evaluated at every
+ * Runge-Kutta stage. Evaluating it once per step and holding it constant, as
+ * this file used to, silently drops the integrator to first order in the
+ * friction term, which is present in most of the cases swept below.
+ */
+typedef struct {
+    const qcollide_friction *fric;
+    const double *contact;   /* constant across the step */
+} plant_ext;
+
+static void plant_ext_torque(const double *q, const double *qd, double *tau_ext,
+                             size_t n, void *user_data)
+{
+    const plant_ext *c = (const plant_ext *)user_data;
+    size_t i;
+    (void)q;
+    qcollide_friction_vector(c->fric, n, qd, tau_ext);
+    for (i = 0u; i < n; ++i) {
+        tau_ext[i] += c->contact[i];
+    }
+}
+
 int main(int argc, char **argv)
 {
     const double friction_scale = (argc > 1) ? atof(argv[1]) : 0.0;
@@ -34,7 +61,7 @@ int main(int argc, char **argv)
     qcollide_sensor_config scfg;
     qcollide_contact contact;
     double q[N] = { 0.4, -0.3 }, qd[N] = { 0.0, 0.0 };
-    double tau[N], qdd[N], ext[N], fr[N], applied[N];
+    double tau[N], qdd[N], ext[N];
     double qm[N], qdm[N], taum[N];
     const double w = 2.0 * PI * 0.4;
     int k, i;
@@ -67,10 +94,13 @@ int main(int argc, char **argv)
         }
         (void)qcollide_inverse_dynamics(&plant, q, qd, qdd, tau);
         qcollide_contact_torque(&contact, N, t, ext);
-        qcollide_friction_vector(&fric, N, qd, fr);
-        for (i = 0; i < N; ++i) applied[i] = ext[i] + fr[i];
-
-        (void)qcollide_step(&plant, q, qd, tau, applied, DT);
+        {
+            plant_ext ctx;
+            ctx.fric = &fric;
+            ctx.contact = ext;
+            (void)qcollide_step_ext(&plant, q, qd, tau,
+                                    plant_ext_torque, &ctx, DT);
+        }
         (void)qcollide_sensors_measure(&sens, N, q, qd, tau, qm, qdm, taum, DT);
 
         if (k == 0) {
