@@ -131,7 +131,7 @@ static void test_update_rejects_bad_arguments(void)
 /**
  * The first update must produce no residual. There is no history to
  * integrate yet, and a spike at start-up is indistinguishable from a contact
- * at start-up — which on a real robot means an unexplained protective stop
+ * at start-up, which on a real robot means an unexplained protective stop
  * every time it powers on.
  */
 static void test_first_update_produces_no_residual(void)
@@ -184,7 +184,7 @@ static void test_residual_converges_to_external_torque(void)
 /**
  * The response should be first order with time constant 1/K, which is what
  * makes detection latency predictable from the gain alone. Checked by the
- * time to reach 63.2 % of the final value — one time constant by definition.
+ * time to reach 63.2 % of the final value, one time constant by definition.
  */
 static void test_time_constant_matches_the_gain(void)
 {

@@ -5,7 +5,7 @@
  * magnitudes directly: hysteresis, the confirmation counter, and the edge
  * cases where a naive implementation lets noise accumulate into a trigger.
  *
- * The second runs the whole chain — plant, observer, detector — and measures
+ * The second runs the whole chain, plant, observer, detector, and measures
  * the three numbers a threshold has to be chosen against: detection latency,
  * false alarms, and the smallest torque that fires at all. Those are
  * reported rather than asserted tightly, because they are the subject of the
