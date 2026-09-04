@@ -137,7 +137,7 @@ qcollide_status qcollide_observer_update(qcollide_observer *o,
 /** Current residual, n elements. Estimates the external joint torque. */
 const double *qcollide_observer_residual(const qcollide_observer *o);
 
-/** Largest absolute residual across joints — the usual detection statistic. */
+/** Largest absolute residual across joints, the usual detection statistic. */
 double qcollide_observer_magnitude(const qcollide_observer *o);
 
 #ifdef __cplusplus

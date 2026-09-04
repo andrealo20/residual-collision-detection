@@ -1,6 +1,6 @@
 # Design notes
 
-## M0 — The plant
+## M0: The plant
 
 ### Why write the dynamics rather than call a library
 
@@ -39,7 +39,7 @@ assumed: measured skew-symmetry residual 4.1e-09 against a matrix scale of
 ### Finite differences for dM/dq, deliberately
 
 The analytical derivative of the mass matrix is available but long, and an
-error in it would break exactly the skew-symmetry above — silently. Central
+error in it would break exactly the skew-symmetry above, silently. Central
 differences are exact to second order, and the property they are meant to
 produce is verified numerically. The cost buys a derivation that cannot be
 quietly wrong.
@@ -50,7 +50,7 @@ The first version computed the derivatives inside the Christoffel triple
 loop, calling a helper that evaluated the mass matrix twice per call. That
 repeats the same handful of distinct derivatives O(n^3) times: for a 3-link
 arm, 162 mass matrix evaluations per Coriolis call, and RK4 needs four of
-those per integration step — 648 evaluations to advance the simulation by one
+those per integration step, 648 evaluations to advance the simulation by one
 timestep.
 
 There are only n distinct derivatives. Computing them once costs 2n
@@ -86,7 +86,7 @@ enough. Checking that drift shrinks with the step at the fourth-order rate
 tests the integrator and the model together, and cannot be satisfied by
 choosing a convenient step size.
 
-## M1 — The observer
+## M1: The observer
 
 ### Why the residual feeds back into its own integral
 
@@ -119,7 +119,7 @@ the residual converging correctly on the loaded joint but sitting at 0.33 Nm
 on a joint with no external torque, after the arm had been driven to 19 rad/s.
 
 Halving the timestep halved the error, which identified it as first-order
-integration error rather than a model mistake — the integrand tracks `pdot`,
+integration error rather than a model mistake, the integrand tracks `pdot`,
 and `pdot` grows with speed. The trapezoidal rule cuts it by fifteen times at
 the same step.
 
@@ -137,7 +137,7 @@ n-joint arm yields n numbers, while a contact has six force components plus
 an unknown location along the structure. Detection is well posed;
 localisation needs assumptions this library does not make.
 
-## M2 — Detection
+## M2: Detection
 
 ### Why the confirmation counter resets on a single sample
 
@@ -173,7 +173,7 @@ contact ends. Measured: 2 ms missed and 5 ms detected at a 20 ms time
 constant.
 
 This bounds the method. A fast light tap cannot be seen, and no threshold
-choice changes that — only a larger K does, at the price of passing more
+choice changes that, only a larger K does, at the price of passing more
 model error. Measuring it here means it appears in the documentation as a
 stated limit rather than being discovered by whoever deploys it.
 
@@ -185,7 +185,7 @@ alarms. Reporting that as a strength would be misleading. It exists to be the
 control condition for M3, where friction makes the number non-zero and the
 threshold finally has to be chosen against something.
 
-## M3 — Model error
+## M3: Model error
 
 ### The asymmetry is the experiment
 
@@ -252,7 +252,7 @@ tend to run when the person measuring also wrote the thing being measured,
 which is the argument for checking what a number would look like if the
 system were broken.
 
-## M4 — Sensors
+## M4: Sensors
 
 ### Why this replaced the planned fixed-point milestone
 

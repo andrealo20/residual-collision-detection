@@ -12,7 +12,7 @@
 If you know the dynamic model of an arm, you know what torque a given motion
 requires. The difference between that and the measured torque is what the
 outside world is doing to the robot. Detect it and you have collision
-detection with no force sensor, no skin, and no extra hardware — which is the
+detection with no force sensor, no skin, and no extra hardware, which is the
 mechanism behind collaborative robots that stop when you touch them.
 
 ![Residual following a contact](docs/images/residual_trace.png)
@@ -73,7 +73,7 @@ pdot  =  tau  +  C(q,qd)' qd  -  g(q)  +  tau_ext
 
 with no acceleration term anywhere. That identity holds precisely because
 `Mdot - 2C` is skew-symmetric, which is why this repository is careful about
-*which* Coriolis matrix it computes — see below. Integrating that expression
+*which* Coriolis matrix it computes, see below. Integrating that expression
 and comparing against the measured momentum gives a residual that converges
 to `tau_ext` and is driven by measured quantities only. This is De Luca's
 formulation, and M1 implements it.
@@ -88,7 +88,7 @@ is the other half of the gap between a simulation and a robot.
 There is a specific reason this matters here. The momentum observer was
 chosen precisely to avoid joint acceleration, because differentiating
 position twice amplifies quantisation noise. But it still needs **velocity**,
-and on a real arm velocity is not measured either — it comes from differencing
+and on a real arm velocity is not measured either: it comes from differencing
 encoder counts. One differentiation is not free: with a 17-bit encoder at
 10 kHz, a single count becomes
 
@@ -119,9 +119,9 @@ metres. Filtering rescues it, reducing the floor by a factor of fifty-five.
 
 **Torque noise is almost irrelevant beside velocity error.** Adding 0.05 Nm
 of torque noise on top of a filtered velocity estimate moves the floor from
-0.477 to 0.480 Nm. That is the opposite of the intuitive ordering — the
+0.477 to 0.480 Nm. That is the opposite of the intuitive ordering: the
 torque measurement is the one that appears explicitly in the residual
-equation — which is exactly why it is worth measuring rather than assuming.
+equation, which is exactly why it is worth measuring rather than assuming.
 
 The filter is not free either: it trades noise for lag, and lag on an
 accelerating joint appears in the residual as a torque that is not there.
@@ -208,7 +208,7 @@ smallest contact it can still catch?
 
 **Realistic model error costs a factor of about fifty in sensitivity.** A
 detector that catches a 0.1 Nm touch with a perfect model needs 5.3 Nm once
-ordinary friction and a 5 % mass error are present — and that is with no
+ordinary friction and a 5 % mass error are present, and that is with no
 sensor noise, no backlash and no joint elasticity, all of which a real arm
 also has.
 
@@ -263,7 +263,7 @@ Two further results worth stating:
 
 **Minimum detectable torque: 0.9989 Nm at a 1.0 Nm threshold.** Found by
 bisection. The residual converges to the applied torque exactly, so the
-smallest detectable contact is the threshold itself — no signal is lost
+smallest detectable contact is the threshold itself: no signal is lost
 between the contact and the decision.
 
 **Zero false alarms at every threshold tested, down to 0.05 Nm.** That is not
@@ -301,7 +301,7 @@ r = K ( p  -  integral( tau + C(q,qd)' qd - g(q) + r ) dt  -  p(0) )
 
 which satisfies `rdot = K (tau_ext - r)` for each joint independently: a
 first-order response whose time constant is 1/K and nothing else. Everything
-in it is measured — position, velocity, torque — with no acceleration
+in it is measured, position, velocity, torque, with no acceleration
 anywhere.
 
 Measured on a two-link arm at 10 kHz, with the observer given the same model
@@ -320,7 +320,7 @@ as the plant:
 
 **The Coriolis transpose.** The residual needs `C'`, not `C`. Using the wrong
 one produces a detector that works perfectly at rest and is wrong whenever
-the arm moves — no error, no warning, just residuals that mean nothing. The
+the arm moves, no error, no warning, just residuals that mean nothing. The
 test suite exercises free motion specifically to catch it: substituting `C`
 for `C'` takes the free-swing residual from 0.0000 to **7.2 Nm** and fails
 three tests. That check was verified by deliberately breaking the code, which
@@ -329,7 +329,7 @@ is the only way to know a test has teeth.
 **The integration rule.** The integrand tracks `pdot`, which grows with joint
 velocity, so forward Euler leaves an error proportional to the timestep times
 the speed of the arm. On a two-link arm driven to 19 rad/s it produced a
-spurious 0.33 Nm on a joint with no external torque at all — well inside the
+spurious 0.33 Nm on a joint with no external torque at all, well inside the
 range of a real light contact. The trapezoidal rule reduces that by a factor
 of fifteen at the same step:
 
@@ -357,7 +357,7 @@ in the project is measured against this model.
 
 The plant is the reference the observer is judged by, so it cannot be taken
 on trust. An error here would produce an observer that appears to work while
-measuring the wrong thing — and no self-written test catches a shared
+measuring the wrong thing, and no self-written test catches a shared
 misunderstanding of the model. [Pinocchio](https://github.com/stack-of-tasks/pinocchio)
 is an independent implementation by another group, so agreement rules that
 out. The same arrangement [qdsp](https://github.com/andrealo20/qdsp) has with
@@ -382,8 +382,8 @@ The tolerances differ for reasons rather than by taste. M and g are
 closed-form in both implementations and agree to machine precision. The
 Coriolis term goes through central differences here, capping accuracy near
 the square root of machine epsilon. And `qdd` inherits the Coriolis error
-amplified by `M^-1` — measured amplification is 2.4x median at n=2 and 3.4x
-at n=4, with the condition number of M reaching 760 — so its tolerance cannot
+amplified by `M^-1`, measured amplification is 2.4x median at n=2 and 3.4x
+at n=4, with the condition number of M reaching 760, so its tolerance cannot
 be tighter than the Coriolis one. An earlier version set it to 1e-8 and the
 code failed for a reason that had nothing to do with correctness.
 
@@ -486,9 +486,9 @@ CMake >= 3.16 and a C99 compiler. Unity is fetched automatically.
 ## Design notes
 
 Decisions, trade-offs and the measurements behind them are in
-[`docs/design.md`](docs/design.md) — including a performance mistake that made
+[`docs/design.md`](docs/design.md), including a performance mistake that made
 the sanitizer build time out, and how it was found.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE).
