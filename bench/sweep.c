@@ -506,6 +506,12 @@ int main(int argc, char **argv)
                1.0, 0.0, 0, 0.0, QCOLLIDE_VEL_EXACT);
     sweep_full("Inertial parameters 5% heavy, ideal sensors",
                0.0, 0.05, 0, 0.0, QCOLLIDE_VEL_EXACT);
+    /* Friction and parameter error together, still on ideal sensors. The
+       README quotes this row, and until now nothing measured it: the sweep
+       ran each source of model error on its own and then jumped straight to
+       everything at once. The drift check caught the gap. */
+    sweep_full("Friction and 5% parameter error, ideal sensors",
+               1.0, 0.05, 0, 0.0, QCOLLIDE_VEL_EXACT);
     sweep_full("Real sensors, perfect model",
                0.0, 0.0, 1, 0.05, QCOLLIDE_VEL_FILTERED);
     sweep_full("Everything: friction, 5% parameter error, real sensors",
