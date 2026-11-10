@@ -13,13 +13,14 @@
 #include "qcollide/friction.h"
 #include "qcollide/sensors.h"
 
+#include "arm.h"
+
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-#define N 2
+#define N ARM_N
 #define DT 1e-4
-static const double PI = 3.14159265358979323846;
 
 
 /**
@@ -60,11 +61,17 @@ int main(int argc, char **argv)
     qcollide_sensors sens;
     qcollide_sensor_config scfg;
     qcollide_contact contact;
-    double q[N] = { 0.4, -0.3 }, qd[N] = { 0.0, 0.0 };
-    double tau[N], qdd[N], ext[N];
+    double q[N], qd[N], qdd[N];
+    double tau[N], ext[N];
     double qm[N], qdm[N], taum[N];
-    const double w = 2.0 * PI * 0.4;
     int k, i;
+
+    /* Start on the trajectory; see arm.h for why that matters. */
+    arm_desired(0.0, q, qd, qdd);
+    for (i = 0; i < N; ++i) {
+        qm[i] = q[i];
+        qdm[i] = qd[i];
+    }
 
     (void)qcollide_model_uniform(&plant, N, 1.0, 0.6, 9.81);
     (void)qcollide_model_perturb(&belief, &plant, param_error);
@@ -89,10 +96,7 @@ int main(int argc, char **argv)
     for (k = 0; k < 30000; ++k) {
         const double t = (double)k * DT;
 
-        for (i = 0; i < N; ++i) {
-            qdd[i] = -0.6 * w * w * sin(w * t + (double)i * 0.7);
-        }
-        (void)qcollide_inverse_dynamics(&plant, q, qd, qdd, tau);
+        arm_command(&plant, t, qm, qdm, tau);
         qcollide_contact_torque(&contact, N, t, ext);
         {
             plant_ext ctx;

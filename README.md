@@ -3,7 +3,7 @@
 [![ci](https://github.com/andrealo20/residual-collision-detection/actions/workflows/ci.yml/badge.svg)](https://github.com/andrealo20/residual-collision-detection/actions/workflows/ci.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/andrealo20/residual-collision-detection/blob/main/LICENSE)
 [![language: C99](https://img.shields.io/badge/language-C99-005599.svg)](https://en.wikipedia.org/wiki/C99)
-[![tests: 45 passing](https://img.shields.io/badge/tests-45%20passing-brightgreen.svg)](https://github.com/andrealo20/residual-collision-detection/blob/main/tests)
+[![tests: 47 passing](https://img.shields.io/badge/tests-47%20passing-brightgreen.svg)](https://github.com/andrealo20/residual-collision-detection/blob/main/tests)
 [![sanitizers: ASan + UBSan](https://img.shields.io/badge/sanitizers-ASan%20%2B%20UBSan-brightgreen.svg)](https://github.com/andrealo20/residual-collision-detection/blob/main/.github/workflows/ci.yml)
 [![verified against Pinocchio](https://img.shields.io/badge/verified%20against-Pinocchio-c2410c.svg)](#verified-against-pinocchio)
 
@@ -28,8 +28,8 @@ sensors it rides on a floor that any threshold has to clear first.*
 
 [![Detection sensitivity against realism](docs/images/tradeoff.svg)](docs/images/tradeoff.svg)
 
-**A 0.1 Nm touch becomes a 4.8 Nm push once ordinary model error and real
-sensors are present.** That factor of roughly fifty is what this project
+**A 0.1 Nm touch becomes a 5.9 Nm push once ordinary model error and real
+sensors are present.** That factor of roughly sixty is what this project
 measures, and it is the reason collaborative robots identify their friction
 models carefully rather than trusting CAD inertias: every newton metre of
 unmodelled torque is a newton metre of contact you can no longer feel.
@@ -274,6 +274,11 @@ Two sources of error, each hidden from the observer and each a single
 severity number: **friction** present in the plant only, and **inertial
 parameter error**, the observer's masses scaled away from the plant's.
 
+The arm moves throughout, both joints swinging 0.6 rad at 0.4 Hz under
+computed-torque control, because friction and inertial error only show up
+in motion. A detector tested at rest would report a trade-off that does not
+exist.
+
 ### The residual floor
 
 With no contact at all, model error alone produces a residual. Any usable
@@ -282,15 +287,16 @@ threshold has to sit above it.
 | Model error           | Peak residual, no contact |
 | ----------------------- | -------------------------- |
 | none                    | 0.001 Nm                  |
-| friction $\times$ 0.25  | 0.603 Nm                  |
-| friction $\times$ 0.50  | 1.101 Nm                  |
-| friction $\times$ 1.00  | 1.866 Nm                  |
-| inertia +2%             | 0.178 Nm                  |
-| inertia +5%             | 0.445 Nm                  |
-| inertia +10%            | 0.890 Nm                  |
+| friction $\times$ 0.25  | 0.389 Nm                  |
+| friction $\times$ 0.50  | 0.780 Nm                  |
+| friction $\times$ 1.00  | 1.565 Nm                  |
+| inertia +2%             | 0.298 Nm                  |
+| inertia +5%             | 0.744 Nm                  |
+| inertia +10%            | 1.488 Nm                  |
 
-Parameter error enters the residual almost exactly linearly: doubling it from
-5% to 10% moves the floor from 0.445 to 0.890, a ratio of 2.00.
+Both enter the residual almost exactly linearly: doubling the parameter error
+from 5% to 10% moves the floor from 0.744 to 1.488, a ratio of 2.00, and
+doubling friction from half to full moves it from 0.780 to 1.565.
 
 ### The trade-off
 
@@ -306,12 +312,18 @@ smallest contact it can still catch?
 | Case               | Lowest usable threshold | Smallest contact caught there |
 | -------------------- | ------------------------ | ------------------------------- |
 | perfect model        | 0.10 Nm                  | 0.10 Nm                        |
-| inertia 5% heavy      | 1.00 Nm                  | 1.07 Nm                        |
-| friction, typical     | 2.00 Nm                  | 3.61 Nm                        |
-| both                  | 4.00 Nm                  | 5.28 Nm                        |
+| inertia 5% heavy      | 1.00 Nm                  | 1.73 Nm                        |
+| friction, typical     | 2.00 Nm                  | 3.53 Nm                        |
+| both                  | 4.00 Nm                  | 6.15 Nm                        |
 
-**Realistic model error costs a factor of about fifty in sensitivity.** A
-detector that catches a 0.1 Nm touch with a perfect model needs 5.3 Nm once
+The smallest contact caught is a worst case over ten moments in the motion
+and both directions of push, with the contact on joint 0 for ten observer
+time constants. Both directions are tried because the floor friction leaves
+is signed, so a push that opposes it can need more torque than one that adds
+to it.
+
+**Realistic model error costs a factor of about sixty in sensitivity.** A
+detector that catches a 0.1 Nm touch with a perfect model needs 6.2 Nm once
 ordinary friction and a 5% mass error are present, and that is with no
 sensor noise, no backlash and no joint elasticity, all of which a real arm
 also has.
@@ -321,7 +333,17 @@ robots identify their friction models carefully rather than relying on CAD
 inertias: every newton metre of unmodelled torque is a newton metre of
 contact you can no longer feel.
 
-### Two measurement mistakes worth recording
+### Three measurement mistakes worth recording
+
+**Measuring on the wrong motion.** The first version drove the arm with
+feedforward alone, starting from rest on a trajectory whose velocity at the
+start is not zero. Nothing corrected the difference. Without friction both
+joints wound up through several radians in four seconds; with friction the
+second joint stuck and never moved. Every table above was first measured on
+that, and each looked plausible. The arm now starts on the trajectory and
+tracks it, and `tests/test_arm.c` checks the motion itself so this cannot
+return unnoticed. The corrected floors and trade-off differ from the old
+ones by up to two thirds, in both directions.
 
 **Reporting 0.00 Nm as excellent sensitivity.** When the threshold sits below
 the residual floor the detector is already firing, so the bisection for the
@@ -334,8 +356,11 @@ measured with the contact always starting at the same time. Under friction
 that number depends strongly on where the arm is in its trajectory: a contact
 arriving while the friction residual is already near its peak needs almost
 nothing to push the total over the threshold. The measurement now takes the
-worst case over five contact phases, which roughly doubled the reported
-figure and made it mean something.
+worst case over ten contact phases and both directions of push. An earlier
+version of that fix held each contact for 1 s and counted a detection
+anywhere in a 1.5 s window, so every "phase" still found its own most
+favourable moment. Contacts now last 0.2 s and a detection counts only from
+the start of the contact to five time constants after its end.
 
 ---
 
@@ -364,21 +389,21 @@ motion.
 
 | Measurement condition                 | Peak residual, no contact |
 | ---------------------------------------- | -------------------------- |
-| exact velocity, no torque noise          | 0.003 Nm                  |
-| exact velocity, 0.05 Nm torque noise     | 0.010 Nm                  |
-| **raw encoder difference**               | **26.313 Nm**              |
-| encoder difference, 50 Hz filter         | 0.477 Nm                  |
-| filtered velocity + torque noise         | 0.480 Nm                  |
+| exact velocity, no torque noise          | 0.002 Nm                  |
+| exact velocity, 0.05 Nm torque noise     | 0.009 Nm                  |
+| **raw encoder difference**               | **27.840 Nm**              |
+| encoder difference, 50 Hz filter         | 0.598 Nm                  |
+| filtered velocity + torque noise         | 0.595 Nm                  |
 
 Two results, neither of them the intuitive one.
 
-**Differentiating quantised position destroys the method outright.** A 26 Nm
+**Differentiating quantised position destroys the method outright.** A 28 Nm
 residual floor with no contact present, against contacts of a few newton
-metres. Filtering rescues it, reducing the floor by a factor of fifty-five.
+metres. Filtering rescues it, reducing the floor by a factor of forty-seven.
 
 **Torque noise is almost irrelevant beside velocity error.** Adding 0.05 Nm
-of torque noise on top of a filtered velocity estimate moves the floor from
-0.477 to 0.480 Nm. That is the opposite of the intuitive ordering, the torque
+of torque noise on top of a filtered velocity estimate leaves the floor where
+it was, 0.598 against 0.595 Nm. That is the opposite of the intuitive ordering, the torque
 measurement is the one that appears explicitly in the residual equation,
 which is exactly why it is worth measuring rather than assuming.
 
@@ -392,20 +417,22 @@ against the 0.013 the filter time constant predicts.
 | Case                                       | Lowest usable threshold | Smallest contact caught |
 | --------------------------------------------- | -------------------------- | -------------------------- |
 | perfect model, ideal sensors                  | 0.10 Nm                    | 0.10 Nm                    |
-| real sensors, perfect model                   | 1.00 Nm                    | 0.88 Nm                    |
-| friction + 5% parameters, ideal sensors       | 4.00 Nm                    | 5.28 Nm                    |
-| **everything**                                | **4.00 Nm**                 | **4.80 Nm**                 |
+| real sensors, perfect model                   | 1.00 Nm                    | 0.73 Nm                    |
+| friction + 5% parameters, ideal sensors       | 4.00 Nm                    | 6.15 Nm                    |
+| **everything**                                | **4.00 Nm**                 | **5.90 Nm**                 |
 
-The last two rows are worth pausing on: adding sensor error to the
-friction-and-parameter case moves the smallest detectable contact from 5.28 Nm
-*down* to 4.80 Nm. More error, better sensitivity, which cannot be right as a
-statement about the method. It is an artefact of the statistic. The figure is
-a worst case over five contact phases, and it is the largest of five bisection
-results rather than an average, so it is not monotone in anything: noise that
-happens to push the residual over the threshold at the hardest phase lowers
-the maximum. Two of the three lines above are the ones to quote; this pair
-says the phase sampling is too coarse to separate them, and a finer sweep over
-contact phases is the fix. It is recorded here rather than smoothed over.
+Two rows say sensor error makes the detector *more* sensitive: a 0.73 Nm
+contact caught at a 1 Nm threshold, and 5.90 Nm against 6.15 Nm once sensors
+join the model error. Neither is a property of the method. Sensor noise
+swings the residual both ways several times within a 0.2 s contact, and the
+detector fires on the first moment that noise and contact together clear the
+threshold, so noise helps a contact over the line wherever it lands. Friction
+error is slow by comparison and cannot do that. The figure measures the
+smallest contact that *can* fire, and with noise present that is below the
+smallest contact that fires reliably, which would need repeated trials with
+different seeds and a detection rate. An earlier version of this section
+blamed the inversion on coarse phase sampling; ten phases and both
+directions did not remove it.
 
 ### A note on the roadmap
 
@@ -436,6 +463,11 @@ Stated because they are the parts a reader should not have to discover.
   localisation is not, without assumptions this library does not make.
 - **No backlash, no joint elasticity, no temperature drift.** All three exist
   on real arms and all three would raise the residual floor further.
+- **Contacts are tested on joint 0 only.** In both directions and at ten
+  moments in the motion, but the floor differs per joint, and a contact on
+  joint 1, or on both at once, may be harder to catch.
+- **One noise seed.** The sensor rows come from a single deterministic run,
+  so they give the smallest contact that can fire, not a detection rate.
 - **No fixed-point implementation.** Planned as M4 and replaced by sensor
   realism; the reasoning is in `docs/design.md` and the milestone is listed
   as open rather than quietly dropped.

@@ -167,15 +167,16 @@ depend on where the torque came from.
 
 ### The blind window is a property, not a bug
 
-A contact shorter than roughly a quarter of the observer time constant is
-missed at any threshold, because the residual is still rising when the
-contact ends. Measured: 2 ms missed and 5 ms detected at a 20 ms time
-constant.
+A rectangular contact of torque T and duration d drives the residual to at
+most T(1 - exp(-Kd)), so a contact much shorter than the observer time
+constant barely moves it. Measured at a 20 ms time constant and a 1 Nm
+threshold: 2 ms missed, 5 ms detected.
 
-This bounds the method. A fast light tap cannot be seen, and no threshold
-choice changes that, only a larger K does, at the price of passing more
-model error. Measuring it here means it appears in the documentation as a
-stated limit rather than being discovered by whoever deploys it.
+This bounds the method, though not absolutely: a lower threshold or a larger
+K recovers shorter contacts, and both pay by passing more model error and
+noise, which is the trade-off M3 and M4 measure. Measuring it here means it
+appears in the documentation as a stated limit rather than being discovered
+by whoever deploys it.
 
 ### Zero false alarms is a baseline, not a result
 
@@ -224,10 +225,25 @@ parameter so its effect can be measured rather than assumed harmless.
 
 The sweep follows a sinusoidal trajectory. A detector evaluated at rest would
 show almost no degradation, because friction and inertial error only appear
-when the joints move -- and it would report a trade-off that does not exist.
-The commanded torque comes from inverse dynamics on the *plant* model, which
-isolates the measurement: the residual then carries only friction and
-parameter error, not a tracking error from an imperfect controller as well.
+when the joints move, and it would report a trade-off that does not exist.
+
+The first version commanded the arm with feedforward alone, inverse dynamics
+of the sinusoid's acceleration, starting from rest. The sinusoid's velocity
+is not zero at the start, so the arm began with a constant velocity error
+that nothing corrected: without friction both joints wound up through
+several radians in four seconds, and with friction the second joint stuck
+and never moved. The friction rows were measured on a one-joint arm and the
+frictionless rows on a spinning one, and the "phases" of the minimum
+detectable torque were not phases of anything periodic. Every table looked
+plausible. A review that simulated the motion on its own found it.
+
+The arm now starts on the trajectory and tracks it with computed-torque
+control from the plant model, at 40 rad/s bandwidth, acting on the measured
+state. The gains do not enter the residual, since the observer is given the
+torque actually commanded; they only decide how closely the arm follows the
+path. Stiction still costs a few hundredths of a radian of tracking error at
+each reversal. `tests/test_arm.c` pins the motion: tracking to 0.1 mrad without
+friction, and both joints swinging at the commanded speed with it.
 
 ### Two mistakes in the measurement itself
 
@@ -245,7 +261,10 @@ with it needs far less torque to cross the threshold than one arriving out of
 phase. The single-instant figure was the lucky case. Taking the worst over
 five phases roughly doubled it -- from 0.15 Nm to 3.61 Nm in the
 friction-only case -- and turned it into the number a detector actually has
-to meet.
+to meet. Both of those figures were measured on the broken trajectory
+described above. The sweep now tries ten phases and both directions of push,
+holds each contact for 0.2 s rather than 1 s, and counts a detection only
+while that contact can be blamed for it; the friction-only figure is 3.53 Nm.
 
 Both errors flattered the result. That is the direction measurement mistakes
 tend to run when the person measuring also wrote the thing being measured,
@@ -276,11 +295,11 @@ force but it still applies, and it turns out to dominate everything else:
 
 | Source | Residual floor |
 |---|---|
-| raw encoder difference | 26.313 Nm |
-| filtered difference | 0.477 Nm |
-| torque noise alone | 0.010 Nm |
+| raw encoder difference | 27.840 Nm |
+| filtered difference | 0.598 Nm |
+| torque noise alone | 0.009 Nm |
 
-Torque noise contributes about two percent of what velocity estimation does,
+Torque noise contributes under two percent of what velocity estimation does,
 despite being the term that appears explicitly in the residual equation. The
 intuitive ranking is wrong, and it would have stayed wrong if the two had
 been introduced together instead of separately.
@@ -320,8 +339,8 @@ search into the wrong file entirely.
 - **A fixed-point observer.** Planned as M4 and replaced by sensor realism;
   see above. The scaling design is the interesting part, since the physical
   quantities here span a far wider dynamic range than the signals in qcsi.
-- The plant is frictionless. Friction is what makes the threshold choice
-  difficult in practice, and it arrives deliberately in M3 rather than being
-  present from the start, so its effect can be measured rather than absorbed.
+- **Contacts on joint 1, and contacts on both joints at once.** The minimum
+  detectable torque is measured with the contact on joint 0, in both
+  directions. The floor differs per joint, so the other joint may be harder.
 - Everything is simulated. No claim is made here about behaviour on a real
-  arm, and the limitation is repeated in M5 rather than left implicit.
+  arm, and the README repeats the limitation rather than leaving it implicit.

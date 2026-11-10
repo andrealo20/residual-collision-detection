@@ -26,7 +26,8 @@
  *
  * The arm is driven along a trajectory rather than held still, because
  * friction and inertial error only appear when the joints move. A detector
- * evaluated at rest would report a trade-off that does not exist.
+ * evaluated at rest would report a trade-off that does not exist. The
+ * trajectory and its controller live in arm.h, shared with the trace.
  */
 #define _POSIX_C_SOURCE 199309L
 
@@ -34,14 +35,19 @@
 #include "qcollide/friction.h"
 #include "qcollide/sensors.h"
 
+#include "arm.h"
+
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
 
-#define N 2
+#define N ARM_N
 #define DT 1e-4
 
-static const double PI = 3.14159265358979323846;
+/* Detections count from the start of a contact until it has ended and the
+   residual has had five observer time constants to fall back. A detection
+   outside that window is not a detection of this contact. */
+#define SETTLE_TIME_CONSTANTS 5.0
 
 typedef struct {
     double friction_scale;   /* 0 = none */
@@ -53,30 +59,6 @@ typedef struct {
     double torque_noise;     /* Nm, standard deviation */
     qcollide_velocity_mode vel_mode;
 } config;
-
-/**
- * Commanded torque for a sinusoidal joint trajectory, from inverse dynamics
- * on the *plant* model.
- *
- * Using the plant model here is deliberate: it isolates the experiment. The
- * residual then carries only friction and the observer's parameter error,
- * not a tracking error from an imperfect controller as well. Adding a
- * controller would make the measurement depend on how it was tuned.
- */
-static void commanded_torque(const qcollide_model *plant, double t,
-                             const double *q, const double *qd, double *tau)
-{
-    double qdd[N];
-    int i;
-    const double w = 2.0 * PI * 0.4;      /* 0.4 Hz */
-    const double amp = 0.6;               /* rad */
-
-    for (i = 0; i < N; ++i) {
-        const double phase = w * t + (double)i * 0.7;
-        qdd[i] = -amp * w * w * sin(phase);
-    }
-    (void)qcollide_inverse_dynamics(plant, q, qd, qdd, tau);
-}
 
 
 /**
@@ -109,7 +91,8 @@ static void plant_ext_torque(const double *q, const double *qd, double *tau_ext,
  * Run the chain once.
  *
  * @param contact  may be NULL for a run with no contact.
- * @return 1 if the detector fired at any point.
+ * @return 1 if the detector fired: with no contact, at any point after the
+ *         start-up; with a contact, within the window it can be blamed for.
  */
 static int run(const config *cfg, const qcollide_contact *contact,
                double duration, unsigned *events, double *peak_residual)
@@ -120,13 +103,25 @@ static int run(const config *cfg, const qcollide_contact *contact,
     qcollide_detector det;
     qcollide_sensors sens;
     qcollide_sensor_config scfg;
-    double q[N] = { 0.4, -0.3 };
-    double qd[N] = { 0.0, 0.0 };
+    double q[N], qd[N], qdd[N];
     double tau[N], ext[N];
     double qm[N], qdm[N], taum[N];
     const int steps = (int)(duration / DT + 0.5);
-    int k, fired = 0;
+    double from = 0.3, until = duration;   /* skip the start-up */
+    int k, i, fired = 0;
     double worst = 0.0;
+
+    /* Start on the trajectory, at rest relative to it. */
+    arm_desired(0.0, q, qd, qdd);
+    for (i = 0; i < N; ++i) {
+        qm[i] = q[i];
+        qdm[i] = qd[i];
+    }
+    if (contact != NULL) {
+        from = contact->start;
+        until = contact->start + contact->duration
+              + SETTLE_TIME_CONSTANTS / cfg->gain;
+    }
 
     (void)qcollide_model_uniform(&plant, N, 1.0, 0.6, 9.81);
     (void)qcollide_model_perturb(&belief, &plant, cfg->param_error);
@@ -153,7 +148,9 @@ static int run(const config *cfg, const qcollide_contact *contact,
     for (k = 0; k < steps; ++k) {
         const double t = (double)k * DT;
 
-        commanded_torque(&plant, t, q, qd, tau);
+        /* The controller acts on the last measurement, as a real one
+           would. */
+        arm_command(&plant, t, qm, qdm, tau);
         qcollide_contact_torque(contact, N, t, ext);
 
         /* Friction acts on the plant only. The observer is given the
@@ -184,8 +181,11 @@ static int run(const config *cfg, const qcollide_contact *contact,
 
         {
             const double mag = qcollide_observer_magnitude(&obs);
-            if (t > 0.3 && mag > worst) worst = mag;   /* skip the start-up */
-            if (t > 0.3 && qcollide_detector_update(&det, mag)) fired = 1;
+            if (t > 0.3 && mag > worst) worst = mag;
+            if (t > 0.3 && qcollide_detector_update(&det, mag)
+                && t >= from && t <= until) {
+                fired = 1;
+            }
         }
     }
 
@@ -196,7 +196,7 @@ static int run(const config *cfg, const qcollide_contact *contact,
 
 /**
  * Smallest contact torque that fires, by bisection, as a worst case over
- * when the contact happens.
+ * when the contact happens and which way it pushes.
  *
  * Measuring at a single instant gives a number that depends on where the
  * arm was in its trajectory. Under friction that dependence is strong: a
@@ -205,37 +205,58 @@ static int run(const config *cfg, const qcollide_contact *contact,
  * contact half a cycle later needs far more. The first version of this
  * function used a fixed start time and reported the lucky case.
  *
- * The contact is therefore tried at several phases of the trajectory and the
- * hardest one is reported, since that is the contact the detector has to be
- * able to catch.
+ * The contact is therefore tried at several phases of the trajectory, pushing
+ * each way, and the hardest case is reported, since that is the contact the
+ * detector has to be able to catch. The floor is signed, so a contact that
+ * opposes it needs more torque than one that adds to it.
+ *
+ * Each contact lasts ten observer time constants, long enough for the
+ * residual to settle on it and short enough to belong to one phase of the
+ * motion. An earlier version held the contact for 40% of a period and
+ * counted a detection anywhere in a 1.5 s window, so each "phase" quietly
+ * picked the most favourable moment inside it.
  */
+#define N_PHASES 10
+#define CONTACT_TIME_CONSTANTS 10.0
+
 static double minimum_detectable(const config *cfg)
 {
-    /* Spread across one 2.5 s period of the 0.4 Hz trajectory. */
-    static const double starts[5] = { 1.00, 1.50, 2.00, 2.50, 3.00 };
+    const double period = 1.0 / ARM_FREQ_HZ;
+    const double duration = CONTACT_TIME_CONSTANTS / cfg->gain;
     double worst = -1.0;
-    int phase;
+    int phase, sign;
 
-    for (phase = 0; phase < 5; ++phase) {
-        qcollide_contact c;
-        double lo = 0.0, hi = 40.0;
-        int it, i;
+    for (phase = 0; phase < N_PHASES; ++phase) {
+        for (sign = -1; sign <= 1; sign += 2) {
+            qcollide_contact c;
+            double lo = 0.0, hi = 40.0, end;
+            int it, i;
 
-        c.start = starts[phase];
-        c.duration = 1.0;
-        for (i = 0; i < N; ++i) c.torque[i] = 0.0;
+            c.start = 1.0 + period * (double)phase / (double)N_PHASES;
+            c.duration = duration;
+            for (i = 0; i < N; ++i) c.torque[i] = 0.0;
+            end = c.start + duration + SETTLE_TIME_CONSTANTS / cfg->gain;
 
-        c.torque[0] = hi;
-        if (!run(cfg, &c, c.start + 1.5, NULL, NULL)) {
-            return -1.0;   /* unbounded at some phase: report it as such */
+            c.torque[0] = (double)sign * hi;
+            if (!run(cfg, &c, end, NULL, NULL)) {
+                return -1.0;   /* unbounded at some phase: report it as such */
+            }
+
+            /* Only the hardest case is reported, so a case that already
+               fires at the current worst needs no bisection of its own. */
+            if (worst > 0.0) {
+                c.torque[0] = (double)sign * worst;
+                if (run(cfg, &c, end, NULL, NULL)) continue;
+                lo = worst;
+            }
+
+            for (it = 0; it < 16; ++it) {
+                const double mid = 0.5 * (lo + hi);
+                c.torque[0] = (double)sign * mid;
+                if (run(cfg, &c, end, NULL, NULL)) hi = mid; else lo = mid;
+            }
+            if (hi > worst) worst = hi;
         }
-
-        for (it = 0; it < 18; ++it) {
-            const double mid = 0.5 * (lo + hi);
-            c.torque[0] = mid;
-            if (run(cfg, &c, c.start + 1.5, NULL, NULL)) hi = mid; else lo = mid;
-        }
-        if (hi > worst) worst = hi;
     }
     return worst;
 }
@@ -313,7 +334,7 @@ static void sweep_full(const char *title, double friction, double param_error,
     cfg.vel_mode = vel_mode;
 
     printf("\n## %s\n\n", title);
-    printf("| threshold | false alarms in 3 s | min. detectable torque |\n");
+    printf("| threshold | false alarms in 4.2 s | min. detectable torque |\n");
     printf("|---|---|---|\n");
 
     for (i = 0; i < 7; ++i) {
@@ -435,8 +456,9 @@ int main(int argc, char **argv)
     }
 
     printf("# qcollide - threshold trade-off under model error\n\n");
-    printf("Two-link arm, sinusoidal trajectory at 0.4 Hz, observer gain "
-           "K = 50 (time constant 20 ms), 3 consecutive samples to confirm.\n");
+    printf("Two-link arm tracking a sinusoidal trajectory at 0.4 Hz under "
+           "computed-torque control, observer gain K = 50 (time constant "
+           "20 ms), 3 consecutive samples to confirm.\n");
 
     /* Peak residual with no contact: the floor any threshold must clear. */
     printf("\n## Residual floor with no contact\n\n");
@@ -522,8 +544,9 @@ int main(int argc, char **argv)
            "misses every contact smaller than itself. The lowest usable "
            "threshold, and the smallest contact it can still catch, are what "
            "decide whether the method is usable on a given arm.\n");
-    printf("\nThe minimum detectable torque is a worst case over five "
-           "contact phases within the trajectory. Measured at a single "
+    printf("\nThe minimum detectable torque is a worst case over ten "
+           "contact phases within the trajectory and both directions of "
+           "push on joint 0. Measured at a single "
            "instant it is considerably lower and considerably less "
            "meaningful: under friction it depends on whether the contact "
            "happens to arrive while the model error is already pushing the "

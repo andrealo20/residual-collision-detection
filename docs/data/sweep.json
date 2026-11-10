@@ -3,23 +3,23 @@
   "confirm_samples": 3,
   "dt": 0.0001,
   "friction_floors": [
-    {"scale": 0, "floor": 0.001185},
-    {"scale": 0.25, "floor": 0.603339},
-    {"scale": 0.5, "floor": 1.101327},
-    {"scale": 1, "floor": 1.865809}
+    {"scale": 0, "floor": 0.001137},
+    {"scale": 0.25, "floor": 0.389375},
+    {"scale": 0.5, "floor": 0.779952},
+    {"scale": 1, "floor": 1.565300}
   ],
   "parameter_floors": [
-    {"error": 0, "floor": 0.001185},
-    {"error": 0.02, "floor": 0.178083},
-    {"error": 0.05, "floor": 0.445200},
-    {"error": 0.1, "floor": 0.890397}
+    {"error": 0, "floor": 0.001137},
+    {"error": 0.02, "floor": 0.297636},
+    {"error": 0.05, "floor": 0.744084},
+    {"error": 0.1, "floor": 1.488167}
   ],
   "sensor_floors": [
-    {"case": "exact velocity, no torque noise", "floor": 0.002672},
-    {"case": "exact velocity, 0.05 Nm noise", "floor": 0.009561},
-    {"case": "encoder difference, no filter", "floor": 26.313431},
-    {"case": "encoder difference, 50 Hz filter", "floor": 0.476732},
-    {"case": "filtered velocity + 0.05 Nm noise", "floor": 0.479675}
+    {"case": "exact velocity, no torque noise", "floor": 0.001564},
+    {"case": "exact velocity, 0.05 Nm noise", "floor": 0.009164},
+    {"case": "encoder difference, no filter", "floor": 27.839579},
+    {"case": "encoder difference, 50 Hz filter", "floor": 0.598328},
+    {"case": "filtered velocity + 0.05 Nm noise", "floor": 0.594779}
   ],
   "cases": [
     {
@@ -28,13 +28,13 @@
       "parameter_error": 0,
       "sensors": false,
       "thresholds": [
-        {"threshold": 0.1000, "false_alarms": 0, "usable": true, "min_detectable": 0.1001},
-        {"threshold": 0.2500, "false_alarms": 0, "usable": true, "min_detectable": 0.2501},
-        {"threshold": 0.5000, "false_alarms": 0, "usable": true, "min_detectable": 0.5002},
-        {"threshold": 1.0000, "false_alarms": 0, "usable": true, "min_detectable": 0.9995},
-        {"threshold": 2.0000, "false_alarms": 0, "usable": true, "min_detectable": 1.9986},
-        {"threshold": 4.0000, "false_alarms": 0, "usable": true, "min_detectable": 3.9986},
-        {"threshold": 8.0000, "false_alarms": 0, "usable": true, "min_detectable": 7.9941}
+        {"threshold": 0.1000, "false_alarms": 0, "usable": true, "min_detectable": 0.1013},
+        {"threshold": 0.2500, "false_alarms": 0, "usable": true, "min_detectable": 0.2515},
+        {"threshold": 0.5000, "false_alarms": 0, "usable": true, "min_detectable": 0.5017},
+        {"threshold": 1.0000, "false_alarms": 0, "usable": true, "min_detectable": 1.0016},
+        {"threshold": 2.0000, "false_alarms": 0, "usable": true, "min_detectable": 2.0013},
+        {"threshold": 4.0000, "false_alarms": 0, "usable": true, "min_detectable": 4.0015},
+        {"threshold": 8.0000, "false_alarms": 0, "usable": true, "min_detectable": 8.0017}
       ]
     },
     {
@@ -44,12 +44,12 @@
       "sensors": false,
       "thresholds": [
         {"threshold": 0.1000, "false_alarms": 1, "usable": false, "min_detectable": null},
-        {"threshold": 0.2500, "false_alarms": 4, "usable": false, "min_detectable": null},
-        {"threshold": 0.5000, "false_alarms": 4, "usable": false, "min_detectable": null},
-        {"threshold": 1.0000, "false_alarms": 4, "usable": false, "min_detectable": null},
-        {"threshold": 2.0000, "false_alarms": 0, "usable": true, "min_detectable": 3.6110},
-        {"threshold": 4.0000, "false_alarms": 0, "usable": true, "min_detectable": 5.7999},
-        {"threshold": 8.0000, "false_alarms": 0, "usable": true, "min_detectable": 10.2596}
+        {"threshold": 0.2500, "false_alarms": 1, "usable": false, "min_detectable": null},
+        {"threshold": 0.5000, "false_alarms": 1, "usable": false, "min_detectable": null},
+        {"threshold": 1.0000, "false_alarms": 1, "usable": false, "min_detectable": null},
+        {"threshold": 2.0000, "false_alarms": 0, "usable": true, "min_detectable": 3.5302},
+        {"threshold": 4.0000, "false_alarms": 0, "usable": true, "min_detectable": 5.5411},
+        {"threshold": 8.0000, "false_alarms": 0, "usable": true, "min_detectable": 9.5545}
       ]
     },
     {
@@ -58,13 +58,13 @@
       "parameter_error": 0.05,
       "sensors": false,
       "thresholds": [
-        {"threshold": 0.1000, "false_alarms": 2, "usable": false, "min_detectable": null},
-        {"threshold": 0.2500, "false_alarms": 3, "usable": false, "min_detectable": null},
+        {"threshold": 0.1000, "false_alarms": 1, "usable": false, "min_detectable": null},
+        {"threshold": 0.2500, "false_alarms": 2, "usable": false, "min_detectable": null},
         {"threshold": 0.5000, "false_alarms": 2, "usable": false, "min_detectable": null},
-        {"threshold": 1.0000, "false_alarms": 0, "usable": true, "min_detectable": 1.0692},
-        {"threshold": 2.0000, "false_alarms": 0, "usable": true, "min_detectable": 2.2281},
-        {"threshold": 4.0000, "false_alarms": 0, "usable": true, "min_detectable": 3.7798},
-        {"threshold": 8.0000, "false_alarms": 0, "usable": true, "min_detectable": 6.8134}
+        {"threshold": 1.0000, "false_alarms": 0, "usable": true, "min_detectable": 1.7282},
+        {"threshold": 2.0000, "false_alarms": 0, "usable": true, "min_detectable": 2.7297},
+        {"threshold": 4.0000, "false_alarms": 0, "usable": true, "min_detectable": 4.7334},
+        {"threshold": 8.0000, "false_alarms": 0, "usable": true, "min_detectable": 8.7375}
       ]
     },
     {
@@ -73,13 +73,13 @@
       "parameter_error": 0.05,
       "sensors": false,
       "thresholds": [
-        {"threshold": 0.1000, "false_alarms": 2, "usable": false, "min_detectable": null},
-        {"threshold": 0.2500, "false_alarms": 4, "usable": false, "min_detectable": null},
-        {"threshold": 0.5000, "false_alarms": 4, "usable": false, "min_detectable": null},
-        {"threshold": 1.0000, "false_alarms": 4, "usable": false, "min_detectable": null},
-        {"threshold": 2.0000, "false_alarms": 1, "usable": false, "min_detectable": null},
-        {"threshold": 4.0000, "false_alarms": 0, "usable": true, "min_detectable": 5.2844},
-        {"threshold": 8.0000, "false_alarms": 0, "usable": true, "min_detectable": 9.5494}
+        {"threshold": 0.1000, "false_alarms": 1, "usable": false, "min_detectable": null},
+        {"threshold": 0.2500, "false_alarms": 1, "usable": false, "min_detectable": null},
+        {"threshold": 0.5000, "false_alarms": 1, "usable": false, "min_detectable": null},
+        {"threshold": 1.0000, "false_alarms": 1, "usable": false, "min_detectable": null},
+        {"threshold": 2.0000, "false_alarms": 2, "usable": false, "min_detectable": null},
+        {"threshold": 4.0000, "false_alarms": 0, "usable": true, "min_detectable": 6.1530},
+        {"threshold": 8.0000, "false_alarms": 0, "usable": true, "min_detectable": 10.1562}
       ]
     },
     {
@@ -88,13 +88,13 @@
       "parameter_error": 0,
       "sensors": true,
       "thresholds": [
-        {"threshold": 0.1000, "false_alarms": 1475, "usable": false, "min_detectable": null},
-        {"threshold": 0.2500, "false_alarms": 130, "usable": false, "min_detectable": null},
-        {"threshold": 0.5000, "false_alarms": 2, "usable": false, "min_detectable": null},
-        {"threshold": 1.0000, "false_alarms": 0, "usable": true, "min_detectable": 0.8812},
-        {"threshold": 2.0000, "false_alarms": 0, "usable": true, "min_detectable": 1.8695},
-        {"threshold": 4.0000, "false_alarms": 0, "usable": true, "min_detectable": 3.8326},
-        {"threshold": 8.0000, "false_alarms": 0, "usable": true, "min_detectable": 7.8004}
+        {"threshold": 0.1000, "false_alarms": 3323, "usable": false, "min_detectable": null},
+        {"threshold": 0.2500, "false_alarms": 610, "usable": false, "min_detectable": null},
+        {"threshold": 0.5000, "false_alarms": 4, "usable": false, "min_detectable": null},
+        {"threshold": 1.0000, "false_alarms": 0, "usable": true, "min_detectable": 0.7287},
+        {"threshold": 2.0000, "false_alarms": 0, "usable": true, "min_detectable": 1.7618},
+        {"threshold": 4.0000, "false_alarms": 0, "usable": true, "min_detectable": 3.7404},
+        {"threshold": 8.0000, "false_alarms": 0, "usable": true, "min_detectable": 7.8384}
       ]
     },
     {
@@ -103,13 +103,13 @@
       "parameter_error": 0.05,
       "sensors": true,
       "thresholds": [
-        {"threshold": 0.1000, "false_alarms": 5, "usable": false, "min_detectable": null},
-        {"threshold": 0.2500, "false_alarms": 37, "usable": false, "min_detectable": null},
-        {"threshold": 0.5000, "false_alarms": 25, "usable": false, "min_detectable": null},
-        {"threshold": 1.0000, "false_alarms": 22, "usable": false, "min_detectable": null},
+        {"threshold": 0.1000, "false_alarms": 1, "usable": false, "min_detectable": null},
+        {"threshold": 0.2500, "false_alarms": 1, "usable": false, "min_detectable": null},
+        {"threshold": 0.5000, "false_alarms": 1, "usable": false, "min_detectable": null},
+        {"threshold": 1.0000, "false_alarms": 1, "usable": false, "min_detectable": null},
         {"threshold": 2.0000, "false_alarms": 2, "usable": false, "min_detectable": null},
-        {"threshold": 4.0000, "false_alarms": 0, "usable": true, "min_detectable": 4.7983},
-        {"threshold": 8.0000, "false_alarms": 0, "usable": true, "min_detectable": 9.2145}
+        {"threshold": 4.0000, "false_alarms": 0, "usable": true, "min_detectable": 5.9046},
+        {"threshold": 8.0000, "false_alarms": 0, "usable": true, "min_detectable": 9.8988}
       ]
     }
   ]

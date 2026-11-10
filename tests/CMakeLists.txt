@@ -9,7 +9,7 @@ FetchContent_MakeAvailable(unity)
 
 target_compile_definitions(unity PUBLIC UNITY_INCLUDE_DOUBLE)
 
-set(QCOLLIDE_TEST_MODULES dynamics observer detector friction sensors)
+set(QCOLLIDE_TEST_MODULES dynamics observer detector friction sensors arm)
 
 foreach(mod IN LISTS QCOLLIDE_TEST_MODULES)
     add_executable(test_${mod} test_${mod}.c)
