@@ -18,7 +18,7 @@ outside world is doing to the robot. Detect it and you have collision
 detection with no force sensor, no skin, and no extra hardware, which is the
 mechanism behind collaborative robots that stop when you touch them.
 
-[![Residual following a contact](https://github.com/andrealo20/residual-collision-detection/raw/main/docs/images/residual_trace.png)](https://github.com/andrealo20/residual-collision-detection/blob/main/docs/images/residual_trace.png)
+[![Residual following a contact](docs/images/residual_trace.svg)](docs/images/residual_trace.svg)
 
 *The residual tracks the external torque. With a perfect model it settles on
 the applied value and returns to zero; with ordinary model error and real
@@ -26,7 +26,7 @@ sensors it rides on a floor that any threshold has to clear first.*
 
 ## The result 
 
-[![Detection sensitivity against realism](https://github.com/andrealo20/residual-collision-detection/raw/main/docs/images/tradeoff.png)](https://github.com/andrealo20/residual-collision-detection/blob/main/docs/images/tradeoff.png)
+[![Detection sensitivity against realism](docs/images/tradeoff.svg)](docs/images/tradeoff.svg)
 
 **A 0.1 Nm touch becomes a 4.8 Nm push once ordinary model error and real
 sensors are present.** That factor of roughly fifty is what this project
@@ -358,7 +358,7 @@ $$
 of velocity noise, which is larger than the velocities of interest in slow
 motion.
 
-[![Sources of the residual floor](https://github.com/andrealo20/residual-collision-detection/raw/main/docs/images/residual_floor.png)](https://github.com/andrealo20/residual-collision-detection/blob/main/docs/images/residual_floor.png)
+[![Sources of the residual floor](docs/images/residual_floor.svg)](docs/images/residual_floor.svg)
 
 ### Where the residual floor actually comes from
 
